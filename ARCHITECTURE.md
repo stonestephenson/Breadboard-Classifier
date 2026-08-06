@@ -79,6 +79,13 @@ constrains stage 3: when pixels are ambiguous, the expected circuit says what we
 looking at. This is the core advantage of *verification* over *discovery* and the reason the
 deferred free-design case is so much harder.
 
+**The baseline is also known.** Students build on the **pre-assembled BasicBoard** — a WB-102
+already populated with 4 LEDs, 4 resistors, 4 black wires and the Metro Mini, at factory-fixed
+positions. So students *modify and extend* a known starting state rather than building from
+nothing. Two consequences: the delta we must perceive is much smaller than a full circuit, and
+placement freedom applies only to what the student adds. The separate blank breadboard in the
+kit is out of scope entirely.
+
 ### [1] Capture — guided, multi-frame
 
 Live alignment overlay; capture is refused until the board is framed. Approved by the project
@@ -137,12 +144,18 @@ Association is the genuinely hard remainder. Helpful structure:
 
 ### [4] Measure — the Arduino probes its own circuit
 
-**UNVALIDATED, pending open question 1.**
+**Confirmed reachable (2026-08-06); protocol access pending.** The student's circuit is
+*always* electrically connected to the Arduino — there is no standalone battery case to blind
+us. A bidirectional command/response protocol over USB already exists and is in daily classroom
+use: the web app sends commands, the sketch executes them, data comes back.
 
-The LbyM platform already talks to the Metro Mini over USB from the browser, and every kit
-includes a USB-C cord and a board with a sketch pre-loaded. If a diagnostic routine can live in
-that sketch, the microcontroller can drive one pin and read the others to determine directly
-which points are electrically joined.
+Constraint: **we may not flash our own sketch.** The shipped sketch is the integration point.
+The open question is whether its existing command set already exposes generic pin primitives
+(set high/low, read digital/analog) — if so the whole probe is implementable client-side with
+no firmware change at all.
+
+Given a driven pin and readable pins, the microcontroller determines directly which points are
+electrically joined.
 
 This is *measurement*, not inference — it converts the least reliable part of the pipeline into
 a hardware fact. The two channels fail in opposite directions:
