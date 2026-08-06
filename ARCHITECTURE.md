@@ -106,12 +106,15 @@ Three properties matter:
 - **Invertible.** A homography inverts, so anything found in canonical space can be drawn back
   onto the student's own photo. We circle the mistake in their picture.
 
-**UNVALIDATED** — this must be proven on the 248 real photos before anything else is built. The
-risk is a board heavily occluded by wires, components and fingers leaving too few visible holes
-to fit against. We cannot buy our way out with a printed alignment mat; kit additions are
-forbidden. Mitigations available: multi-frame (fit on whichever frames are cleanest), guided
-capture (board is known to be roughly positioned and filling the frame), rail stripes and
-printed column labels as secondary features.
+**PARTIALLY VALIDATED (2026-08-06)** — see `docs/SPIKE_RECTIFY.md`. On a 12-photo sample of the
+real data, 8 fitted successfully with median reprojection residual of **0.02–0.06 pitch**. We
+need half-pitch accuracy to assign a lead to the right column, so the margin is roughly an order
+of magnitude. Geometry is not the limiting factor; detection recall and occlusion are.
+
+Still open: anchoring the lattice to the board spec (a bare grid is ambiguous up to an integer
+origin and a 180° flip), and 4/12 failures on images with heavy background speckle. Neither is
+expected to survive contact with guided multi-frame capture — we need one good frame per clip,
+not one good photo per attempt.
 
 ### [3] Perceive — in canonical space
 
@@ -266,7 +269,7 @@ deliberately deferred, not foreclosed — keep the model boundary clean so it ca
 
 | Risk | Severity | Mitigation |
 |------|----------|-----------|
-| Rectification fails on cluttered real photos | **Critical** — invalidates the architecture | Prototype first, on real data, before building anything else |
+| ~~Rectification fails on cluttered real photos~~ | **Downgraded** 2026-08-06 | Spiked: 8/12 fit at 0.02–0.06 pitch residual. See `docs/SPIKE_RECTIFY.md` |
 | Occlusion hides connections | High | Multi-frame capture, measurement channel, abstention |
 | Wire endpoint association | High | Fixed lengths bound search; colour separates crossings; measurement confirms |
 | LED polarity not visible once seated | Medium | May be electrically detectable; otherwise a UX nudge |
