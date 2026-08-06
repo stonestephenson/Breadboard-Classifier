@@ -7,8 +7,9 @@ marked **UNVALIDATED** is a belief, not a result.
 
 ## 1. The problem, stated precisely
 
-**Input:** a short video clip of a WB-102 breadboard, captured through a Chromebook browser
-under a guided alignment overlay, plus the identity of the lab the student is attempting.
+**Input:** a short video clip of a WB-102 breadboard, captured in-browser under a guided
+alignment overlay — from either a Chromebook webcam or a phone (§3[1]) — plus the identity of
+the lab the student is attempting.
 
 **Output:** either "your wiring matches the lab" (high confidence only), or a specific,
 actionable repair — "the black wire in row 14 needs to move one column left" — or an honest
