@@ -9,7 +9,22 @@ curriculum side.
 
 ---
 
-## Q1 — WebSerial and the diagnostic sketch  🟡 PARTIAL (2026-08-06)
+## Q1 — WebSerial and the diagnostic sketch  🟢 LARGELY RESOLVED (2026-08-06)
+
+**Firmware side is solved.** The sketch source arrived and exposes arbitrary memory read/write,
+which on the ATmega328P means full memory-mapped GPIO control. A complete connectivity probe is
+implementable **today, with no firmware change**. Full analysis in `docs/FIRMWARE_PROTOCOL.md`.
+
+**What still matters from Troy / the web app:**
+- Whether our code may send raw serial commands through the web app. This is now the *only*
+  remaining dependency for the measurement channel, and it is a web-app question, not firmware.
+  → **Accept the offer to see the web app source.**
+- A first-class diagnostic opcode as the production path: faster, safer, and stable across
+  firmware revisions than poking memory.
+- A bug report: `digitalRead` on pins 0–5 and 7 is unreachable, shadowed by earlier branches in
+  the dispatch chain.
+
+### Earlier partial answer
 
 **Answered so far:**
 - A **bidirectional command/response protocol already exists**: the web app sends commands over

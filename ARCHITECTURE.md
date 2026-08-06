@@ -184,12 +184,28 @@ us. A bidirectional command/response protocol over USB already exists and is in 
 use: the web app sends commands, the sketch executes them, data comes back.
 
 Constraint: **we may not flash our own sketch.** The shipped sketch is the integration point.
-The open question is whether its existing command set already exposes generic pin primitives
-(set high/low, read digital/analog) — if so the whole probe is implementable client-side with
-no firmware change at all.
 
-Given a driven pin and readable pins, the microcontroller determines directly which points are
-electrically joined.
+**RESOLVED (2026-08-06) — see `docs/FIRMWARE_PROTOCOL.md`.** The shipped sketch exposes
+arbitrary memory read (`0xFE`) and write (`0xFD`). On an AVR the GPIO registers are
+memory-mapped, so this is already complete control over pin direction, pull-ups, drive state and
+reads. **A full connectivity probe is implementable today with no firmware change and no
+external dependency.**
+
+The probe: put every pin in INPUT_PULLUP, then drive one pin LOW at a time and read the port
+registers. Any pin reading LOW shares an electrical node with the driven pin. ~65 transactions,
+well under a second. `analogRead`'s 10 bits additionally separate a direct connection from one
+through a 330 Ω resistor from a floating node.
+
+Two capabilities this unlocks beyond plain connectivity:
+
+- **LED polarity becomes measurable.** A diode conducts one way only, so an asymmetric response
+  to reversed drive reveals orientation — retiring a perception problem §5 flags as known-hard.
+- **Stimulus–response capture.** We already record a video clip; if the Arduino toggles pins
+  during it, *whichever LED blinks in the video is the LED on that pin*. Component-to-node
+  association by observation rather than inference.
+
+Remaining dependency is no longer firmware but the **web app**: whether our code may send raw
+serial commands through it.
 
 This is *measurement*, not inference — it converts the least reliable part of the pipeline into
 a hardware fact. The two channels fail in opposite directions:
