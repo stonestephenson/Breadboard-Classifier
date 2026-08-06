@@ -79,20 +79,53 @@ constrains stage 3: when pixels are ambiguous, the expected circuit says what we
 looking at. This is the core advantage of *verification* over *discovery* and the reason the
 deferred free-design case is so much harder.
 
-**The baseline is also known.** Students build on the **pre-assembled BasicBoard** — a WB-102
-already populated with 4 LEDs, 4 resistors, 4 black wires and the Metro Mini, at factory-fixed
-positions. So students *modify and extend* a known starting state rather than building from
-nothing. Two consequences: the delta we must perceive is much smaller than a full circuit, and
-placement freedom applies only to what the student adds. The separate blank breadboard in the
-kit is out of scope entirely.
+**The inventory is known; the layout is not.** Students build on the **pre-assembled
+BasicBoard** — a WB-102 shipped populated with 4 LEDs, 4 resistors, 4 black wires and the Metro
+Mini. The separate blank breadboard is out of scope entirely.
 
-### [1] Capture — guided, multi-frame
+What this does and does not buy us:
 
-Live alignment overlay; capture is refused until the board is framed. Approved by the project
-side. A short clip rather than a single frame: natural hand movement means each frame sees the
-board from a slightly different angle, so a wire occluding a hole in one frame will not occlude
-it in the next. Multi-frame fusion is the primary defence against occlusion and it costs the
-student nothing over a single photo.
+- ✅ **Known component inventory.** We know what is on the board — counts and types — before we
+  look. That constrains perception meaningfully and is a genuine prior.
+- ❌ **NOT known positions.** A student can move anything, and *moving a pre-positioned part is
+  itself a plausible error we must catch*. The factory layout is a **prior for ranking
+  hypotheses, never a constraint to verify against.** Nothing downstream may assume a component
+  is where it shipped.
+- ⚠️ **Anchoring must not depend on it.** Rectification anchors on features physically molded or
+  printed into the board — the 3-pitch centre channel and the asymmetric red/blue rail stripe
+  order — which cannot move. The Metro Mini is corroboration only: it is physically stubborn
+  (24+ pins, no lab asks students to reseat it), but "stubborn" is not "guaranteed".
+
+### [1] Capture — guided, multi-frame, two device paths
+
+**Both paths are supported** (decided 2026-08-06). Every student can use the machine they
+already have; students with a phone get the better result.
+
+| | Chromebook webcam | Phone |
+|---|---|---|
+| Availability | universal | most students |
+| Optical quality | ~720p, soft, wide-angle | 3–4× linear resolution |
+| Serial link to the Metro Mini | ✅ same device | ❌ WebSerial is desktop-only |
+| Session complexity | single device | needs pairing (QR / short code) |
+
+Neither path dominates, which is why we build both: the Chromebook path is optically worse but
+architecturally simpler (camera and USB on one machine); the phone path is optically better but
+splits the two channels across devices and needs a pairing step, with the phone running vision
+locally and uploading only the extracted netlist.
+
+**Rectifying first is what makes two capture paths affordable.** Both cameras produce the *same
+canonical view* — differing in effective resolution and sharpness, not geometry — so the
+perception model sees one domain, not two. Size canonical space for the worst case (≈24 px per
+pitch, which 720p supplies when guided capture makes the board fill the frame) and phone
+capture simply oversamples it.
+
+Cost: evaluation data is needed from both. Any laptop webcam is an adequate development proxy
+for a Chromebook; we do not need a specific district model.
+
+In both paths: live alignment overlay, capture refused until the board is framed, and a short
+clip rather than a single frame. Natural hand movement means each frame sees the board slightly
+differently, so a wire occluding a hole in one frame will not occlude it in the next.
+Multi-frame fusion is the primary defence against occlusion and costs the student nothing.
 
 ### [2] Rectify — the foundation
 

@@ -127,18 +127,19 @@ collection pass through the real device is needed for training.
    Combined with the confirmed command/response protocol in Q1, electrical measurement moves
    from "promising mitigation" to *the likely backbone of the system*.
 
-2. **The starting state is known exactly.** The BasicBoard ships pre-populated (4 LEDs, 4
-   resistors, 4 black wires, Metro Mini). Students *modify and extend* a known baseline rather
-   than building from nothing, so the delta we must perceive is far smaller than a full circuit.
+2. **The component inventory is known**, though not the layout. The BasicBoard ships
+   pre-populated (4 LEDs, 4 resistors, 4 black wires, Metro Mini), so we know *what* is on the
+   board before looking. Useful.
 
-3. **Part of the board is at factory-fixed positions.** Placement freedom applies to what the
-   student adds, not to what was pre-assembled. This partially restores the positional prior
-   that DECISIONS.md R2/R3 gave up.
+3. **Positions are NOT known.** *(Corrected 2026-08-06 — an earlier draft of this file claimed
+   otherwise.)* Students can move pre-positioned parts, and moving one is itself a plausible
+   error we must catch. The factory layout is a prior for ranking hypotheses, never a constraint
+   to verify against. The positional prior given up in DECISIONS.md R2/R3 stays given up.
 
-4. **It solves the rectification anchoring problem** (`docs/SPIKE_RECTIFY.md`). The Metro Mini
-   is always present, is a large high-contrast rigid object, and sits at a known position on the
-   BasicBoard — so detecting it fixes the 180° flip and the index origin directly, without
-   needing to read rail-stripe order or printed labels.
+4. **Anchoring must use board-intrinsic features**, not the Metro Mini
+   (`docs/SPIKE_RECTIFY.md`). The 3-pitch centre channel and the asymmetric red/blue rail stripe
+   order are molded and printed into the board and cannot move. The Metro Mini is corroboration
+   only.
 
 ---
 
