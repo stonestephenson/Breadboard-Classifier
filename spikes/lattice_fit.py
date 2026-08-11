@@ -35,10 +35,10 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from scipy.spatial import cKDTree
+from scipy.spatial import KDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from hole_detect import detect_holes  # noqa: E402
+from hole_detect import detect_holes
 
 REPO = Path(__file__).resolve().parent.parent
 OUT = REPO / "data" / "cache"
@@ -116,7 +116,7 @@ def lattice_vectors(pts: np.ndarray, radius: int = 110, n_peaks: int = 6
 
 
 def grow_lattice(pts: np.ndarray, v1: np.ndarray, v2: np.ndarray, seed: int,
-                 tree: cKDTree, tol: float = 0.34) -> dict[tuple[int, int], int]:
+                 tree: KDTree, tol: float = 0.34) -> dict[tuple[int, int], int]:
     """BFS from `seed`, assigning integer (col, row) to each hole.
 
     Steps of 1 pitch are tried first; a step of 3 along the row axis crosses the
@@ -149,9 +149,12 @@ def grow_lattice(pts: np.ndarray, v1: np.ndarray, v2: np.ndarray, seed: int,
             if (max(hi_c, c) - min(lo_c, c) + 1 > MAX_COL_SPAN
                     or max(hi_r, r) - min(lo_r, r) + 1 > MAX_ROW_SPAN):
                 continue
-            d, j = tree.query(p + dc * v1 + dr * v2, k=1,
-                              distance_upper_bound=tol * pitch)
-            if not np.isfinite(d) or j in index:
+            d, hit = tree.query(p + dc * v1 + dr * v2, k=1,
+                                distance_upper_bound=tol * pitch)
+            if not np.isfinite(d):
+                continue
+            j = int(hit)
+            if j in index:
                 continue
             index[j] = key
             taken[key] = j
@@ -170,27 +173,12 @@ def best_lattice(pts: np.ndarray, n_seeds: int = 4
     being adopted. On cluttered scenes (keyboard, carpet, desk edge) the naive
     choice locked onto a half-pitch lattice and indexed a single point.
     """
-    tree = cKDTree(pts)
+    tree = KDTree(pts)
     # Seed from the densest neighbourhoods: the board is the one place in the
     # frame with hundreds of regularly spaced blobs, so density finds it even
     # when it is a minority of the detections.
     density = tree.query_ball_point(pts, r=60, return_length=True)
     seeds = [int(i) for i in np.argsort(density)[::-1][:n_seeds * 40:40]]
-
-    def spans(t: dict[tuple[int, int], int]) -> tuple[int, int]:
-        cs = [c for c, _ in t]
-        rs = [r for _, r in t]
-        return max(cs) - min(cs) + 1, max(rs) - min(rs) + 1
-
-    def plausible(t: dict[tuple[int, int], int]) -> bool:
-        # Hard geometric prior from the board spec: a WB-102 is 63 columns wide
-        # and 12 row-slots deep (a-e, a 3-pitch centre channel, f-j), plus power
-        # rails a few pitches beyond. Anything claiming far more than that is
-        # not the board — it is growth that has escaped into background clutter,
-        # or a diagonal basis inflating both spans. Rejecting on span is what
-        # stops those candidates from winning on coverage alone.
-        c, r = spans(t)
-        return c <= MAX_COL_SPAN and r <= MAX_ROW_SPAN
 
     scored = []
     for v1, v2 in lattice_vectors(pts):
@@ -224,8 +212,7 @@ def best_lattice(pts: np.ndarray, n_seeds: int = 4
         (ax, ay), (bx, by) = s[1], s[2]
         return abs(ax * by - ay * bx)
 
-    taken, v1, v2 = min(viable, key=cell_area)
-    return taken, v1, v2
+    return min(viable, key=cell_area)
 
 
 def fit_homography(pts: np.ndarray, taken: dict[tuple[int, int], int]):
@@ -250,11 +237,11 @@ def analyse(path: str) -> dict | None:
     if len(pts) < 200:
         return None
 
-    taken, v1, v2 = best_lattice(pts)
+    taken, _, v2 = best_lattice(pts)
     if len(taken) < 100:
         return None
 
-    H, src, dst, resid, inliers = fit_homography(pts, taken)
+    H, _, _, resid, inliers = fit_homography(pts, taken)
     pitch_px = float(np.linalg.norm(v2))
 
     cols = sorted({c for c, _ in taken})

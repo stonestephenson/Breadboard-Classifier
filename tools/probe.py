@@ -36,11 +36,11 @@ PIND, DDRD, PORTD = 0x29, 0x2A, 0x2B
 # Arduino pin -> (PIN reg, DDR reg, PORT reg, bit). D0-D7 on port D, D8-D13 on
 # port B, A0-A5 on port C.
 PINS: dict[str, tuple[int, int, int, int]] = {}
-for _n in range(0, 8):
+for _n in range(8):
     PINS[f"D{_n}"] = (PIND, DDRD, PORTD, _n)
 for _n in range(8, 14):
     PINS[f"D{_n}"] = (PINB, DDRB, PORTB, _n - 8)
-for _n in range(0, 6):
+for _n in range(6):
     PINS[f"A{_n}"] = (PINC, DDRC, PORTC, _n)
 
 # D0/D1 are the USB serial link itself — touching them kills our connection.
@@ -86,7 +86,7 @@ class Board:
     def read_mem(self, addr: int) -> int:
         r = self._cmd(bytes([OP_READ_MEM, addr & 0xFF, (addr >> 8) & 0xFF]), 1)
         if len(r) != 1:
-            raise IOError(f"no reply reading 0x{addr:02x}")
+            raise OSError(f"no reply reading 0x{addr:02x}")
         return r[0]
 
     def write_mem(self, addr: int, value: int) -> None:
@@ -95,7 +95,7 @@ class Board:
     def analog_read(self, ch: int) -> int:
         r = self._cmd(bytes([OP_ANALOG[ch]]), 2)
         if len(r) != 2:
-            raise IOError(f"no reply reading A{ch}")
+            raise OSError(f"no reply reading A{ch}")
         return r[0] | (r[1] << 8)
 
     # --- register state ------------------------------------------------------
@@ -113,7 +113,7 @@ class Board:
         for reg, v in vals.items():
             got = self.read_mem(reg)
             if got != v:
-                raise IOError(f"write to 0x{reg:02x} did not stick: "
+                raise OSError(f"write to 0x{reg:02x} did not stick: "
                               f"wrote 0b{v:08b}, read back 0b{got:08b} "
                               f"(serial desync?)")
 

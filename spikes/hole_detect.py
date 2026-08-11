@@ -38,7 +38,7 @@ def detect_holes(bgr: np.ndarray) -> tuple[np.ndarray, float]:
 
     keep = []
     for i in range(1, n):
-        x, y, w, h, area = stats[i]
+        _, _, w, h, area = stats[i]
         if area < 6 or area > 400:
             continue
         if w == 0 or h == 0:
@@ -82,8 +82,8 @@ def main(paths: list[str]) -> None:
               f"({100 * len(pts) / expected:5.1f}% of 830)  pitch={pitch:5.1f}px")
 
         vis = bgr.copy()
-        for x, y in pts:
-            cv2.circle(vis, (int(round(x)), int(round(y))), 3, (0, 0, 255), -1)
+        for cx, cy in pts:
+            cv2.circle(vis, (round(cx), round(cy)), 3, (0, 0, 255), -1)
         tiles.append(cv2.resize(vis, (700, int(700 * vis.shape[0] / vis.shape[1]))))
 
     if tiles:

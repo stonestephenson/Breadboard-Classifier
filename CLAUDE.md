@@ -16,16 +16,24 @@ Chrome on school-issued machines).
 
 ## Status
 
-**Design phase. No implementation yet.** The architecture below is settled in shape; the
-riskiest assumption (rectification on real cluttered photos) is not yet validated.
+**Reasoning half built and tested; perception half in progress.**
 
-Immediate work, in order:
+| Piece | State |
+|-------|-------|
+| Circuit model + checker (`breadboard/`) | **Done.** 109 tests, `docs/CHECKER.md` |
+| Electrical probe (`tools/probe.py`) | **Working on real hardware.** `docs/FIRMWARE_PROTOCOL.md` |
+| Rectifier (`spikes/`) | Partly working; basis selection unsolved. `docs/SPIKE_RECTIFY.md` |
+| Per-node occupancy from photos | Not started; needs training data |
+| Lab reference circuits | Blocked on curriculum PDFs |
 
-1. **Rectifier spike** — validate homography fitting on the 248 real photos. Go/no-go for the
-   whole architecture. Not started.
-2. **Netlist schema + checker** — buildable today against hand-written netlists, no CV
-   required. Not started.
-3. Everything else is gated on the open questions below.
+Run everything: `./venv/bin/python -m pytest tests/ -q`
+
+Next, in order:
+
+1. **Rectifier: anchor on the rail stripes before fitting the lattice.** Current failure and the
+   intended fix are both written up in `docs/SPIKE_RECTIFY.md`.
+2. **Emit a Netlist from the probe**, so the electrical channel feeds the checker end to end.
+3. **Sensors in the graph** — `sensor3`/`sensor4` parse but are not yet graph vertices.
 
 ## The one principle
 

@@ -1,0 +1,154 @@
+"""WB-102 breadboard geometry: holes, electrical nodes, and physical positions.
+
+Two facts about a breadboard drive this whole project:
+
+1. **Holes in a column strip are electrically identical.** Rows a-e in column 24
+   are one node; f-j are another. So a lead's *row* never matters — only its
+   column and which half it is in. That collapses 830 physical holes into 134
+   electrical nodes and relaxes the precision the camera must achieve by 5x
+   along the axis that would otherwise hurt most.
+
+2. **The power rails are split.** Each of the four rails is two separate 25-hole
+   runs, not one continuous strip. Students wire power into one half and ground
+   into the other, see nothing work, and cannot tell why. Modelling the split is
+   what lets us name that error.
+
+Hole addressing (also the format curriculum authors will write):
+
+    terminal   "<row><column>"    rows a-j, columns 1-63     e.g. "c24", "j63"
+    rail       "<rail>:<index>"   index 1-50                 e.g. "p1+:37"
+
+Rail names follow the sibling generator repo so circuit configs stay portable:
+p1+ and p1- are the two rails along one long edge, p2+ and p2- the other.
+"""
+
+from __future__ import annotations
+
+import re
+
+PITCH_MM = 2.54
+CHANNEL_PITCHES = 3  # centre channel is 7.62mm = 0.3", the DIP package width
+
+ROWS_UPPER = "abcde"
+ROWS_LOWER = "fghij"
+ROWS = ROWS_UPPER + ROWS_LOWER
+N_COLS = 63
+
+RAILS = ("p1+", "p1-", "p2+", "p2-")
+RAIL_HOLES = 50
+RAIL_SEGMENT_HOLES = 25  # each rail is two independent runs of this length
+
+_TERMINAL_RE = re.compile(r"^([a-j])([0-9]{1,2})$")
+_RAIL_RE = re.compile(r"^(p[12][+-]):([0-9]{1,2})$")
+
+
+class BoardError(ValueError):
+    """A hole reference that this board does not have."""
+
+
+def parse_hole(hole: str) -> tuple[str, int]:
+    """Normalise a hole reference into (row_or_rail, index).
+
+    Accepts either case; authors and students will not be consistent.
+    """
+    if not isinstance(hole, str):
+        raise BoardError(f"hole must be a string, got {type(hole).__name__}")
+    text = hole.strip().lower()
+
+    m = _TERMINAL_RE.match(text)
+    if m:
+        row, col = m.group(1), int(m.group(2))
+        if not 1 <= col <= N_COLS:
+            raise BoardError(f"column {col} out of range 1-{N_COLS}: {hole!r}")
+        return row, col
+
+    m = _RAIL_RE.match(text)
+    if m:
+        rail, idx = m.group(1), int(m.group(2))
+        if rail not in RAILS:
+            raise BoardError(f"unknown rail {rail!r}: {hole!r}")
+        if not 1 <= idx <= RAIL_HOLES:
+            raise BoardError(f"rail hole {idx} out of range 1-{RAIL_HOLES}: {hole!r}")
+        return rail, idx
+
+    raise BoardError(f"not a valid WB-102 hole: {hole!r}")
+
+
+def node_of(hole: str) -> str:
+    """The electrical node a hole belongs to.
+
+    Terminal nodes are named "T:<half>:<column>" where half is the row group
+    that shares the strip. Rail nodes are "R:<rail>:<segment>".
+    """
+    where, index = parse_hole(hole)
+    if where in ROWS:
+        half = "ae" if where in ROWS_UPPER else "fj"
+        return f"T:{half}:{index}"
+    segment = 1 if index <= RAIL_SEGMENT_HOLES else 2
+    return f"R:{where}:{segment}"
+
+
+def nodes() -> list[str]:
+    """Every electrical node on the board, in a stable order."""
+    out = [f"T:{half}:{col}"
+           for col in range(1, N_COLS + 1)
+           for half in ("ae", "fj")]
+    out += [f"R:{rail}:{seg}" for rail in RAILS for seg in (1, 2)]
+    return out
+
+
+def _all_holes() -> list[str]:
+    out = [f"{row}{col}" for col in range(1, N_COLS + 1) for row in ROWS]
+    out += [f"{rail}:{i}" for rail in RAILS for i in range(1, RAIL_HOLES + 1)]
+    return out
+
+
+ALL_HOLES: tuple[str, ...] = tuple(_all_holes())
+
+
+def is_rail(node: str) -> bool:
+    return node.startswith("R:")
+
+
+def rail_of(node: str) -> str | None:
+    """The rail a node belongs to, or None for terminal nodes."""
+    return node.split(":")[1] if is_rail(node) else None
+
+
+def same_rail_different_segment(a: str, b: str) -> bool:
+    """True for two nodes on the same rail but on opposite sides of its split.
+
+    This is the signature of a specific, common, invisible student error: the
+    connection looks right because both holes are in the same painted stripe,
+    but the board has no metal joining them.
+    """
+    if not (is_rail(a) and is_rail(b)):
+        return False
+    ra, sa = a.split(":")[1:]
+    rb, sb = b.split(":")[1:]
+    return ra == rb and sa != sb
+
+
+def hole_position(hole: str) -> tuple[float, float]:
+    """Physical position in millimetres from the board's top-left hole.
+
+    Used to convert between the checker's world and the rectified image, and to
+    express "move it one column left" as a real distance.
+    """
+    where, index = parse_hole(hole)
+    if where in ROWS:
+        x = (index - 1) * PITCH_MM
+        row_i = ROWS.index(where)
+        # Rows a-e are contiguous; f-j sit one channel width further down.
+        y = row_i * PITCH_MM
+        if where in ROWS_LOWER:
+            y += (CHANNEL_PITCHES - 1) * PITCH_MM
+        return x, y
+
+    # Rail holes sit in groups of five with a gap between groups, and the rails
+    # run outside the terminal area on both long edges.
+    group, within = divmod(index - 1, 5)
+    x = (group * 6 + within) * PITCH_MM
+    edge_offset = -2 * PITCH_MM if where.startswith("p1") else 14 * PITCH_MM
+    y = edge_offset + (0.0 if where.endswith("+") else PITCH_MM)
+    return x, y
