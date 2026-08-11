@@ -35,6 +35,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from hole_detect import detect_holes  # noqa: E402
@@ -48,16 +49,25 @@ N_COLS = 63
 ROW_INDICES = [0, 1, 2, 3, 4, 7, 8, 9, 10, 11]  # a b c d e | f g h i j
 N_TERMINAL_HOLES = N_COLS * len(ROW_INDICES)
 
+# Largest lattice the board can possibly produce, with slack. 63 terminal
+# columns; 12 row-slots for a-j including the 3-pitch centre channel, plus the
+# power rails a few pitches beyond each edge.
+MAX_COL_SPAN = 72
+MAX_ROW_SPAN = 22
 
-def lattice_vectors(pts: np.ndarray, radius: int = 110) -> tuple[np.ndarray, np.ndarray]:
+
+def lattice_vectors(pts: np.ndarray, radius: int = 110, n_peaks: int = 6
+                    ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Recover the two lattice basis vectors by point-set autocorrelation.
 
     Histogram every pairwise displacement shorter than `radius`. A regular grid
     puts sharp peaks at every integer combination of its basis vectors; random
-    background texture contributes only a diffuse blob. So the two shortest
-    strong peaks *are* the basis, recovered without needing a pitch estimate
-    first — which matters, because a pitch estimated from raw detections is
-    poisoned by desk speckle on exactly the images we most need to handle.
+    background texture contributes only a diffuse blob. Peaks therefore give us
+    the basis without needing a pitch estimate first — which matters, because a
+    pitch estimated from raw detections is poisoned by desk speckle on exactly
+    the images we most need to handle.
+
+    Returns *all* plausible basis pairs rather than one, strongest first.
     """
     R = radius
     acc = np.zeros((2 * R + 1, 2 * R + 1), np.float32)
@@ -84,57 +94,138 @@ def lattice_vectors(pts: np.ndarray, radius: int = 110) -> tuple[np.ndarray, np.
 
     # Displacements are symmetric, so fold antipodal peaks together.
     vecs = vecs[(vecs[:, 0] > 0) | ((vecs[:, 0] == 0) & (vecs[:, 1] > 0))]
-    vecs = vecs[np.argsort(np.linalg.norm(vecs, axis=1))]
+    strength = acc[(vecs[:, 1] + R).astype(int), (vecs[:, 0] + R).astype(int)]
+    vecs = vecs[np.argsort(strength)[::-1]][:n_peaks]
 
-    v1 = vecs[0]
-    v2 = None
-    for v in vecs[1:]:
-        cosang = abs(v @ v1) / (np.linalg.norm(v) * np.linalg.norm(v1))
-        if cosang < np.cos(np.deg2rad(30)):
-            v2 = v
-            break
-    if v2 is None:
-        raise RuntimeError("could not find a second lattice direction")
+    # Every non-degenerate pair is a candidate basis. Picking the shortest peak
+    # outright is wrong: clutter (desk texture, keyboards, carpet) can produce a
+    # strong short spurious peak, and locking onto a half-pitch sub-lattice
+    # silently ruins every index. The caller decides between candidates by which
+    # one actually explains the most points.
+    cands = []
+    for i in range(len(vecs)):
+        for j in range(i + 1, len(vecs)):
+            a, b = vecs[i], vecs[j]
+            cosang = abs(a @ b) / (np.linalg.norm(a) * np.linalg.norm(b))
+            if cosang < np.cos(np.deg2rad(30)):
+                # Order so the first vector runs along the board's long axis.
+                cands.append((b, a) if abs(a[0]) < abs(b[0]) else (a, b))
+    if not cands:
+        raise RuntimeError("no valid lattice basis candidates")
+    return [(np.asarray(u, float), np.asarray(v, float)) for u, v in cands]
 
-    # Order so v1 runs along the board's long axis (columns).
-    if abs(v1[0]) < abs(v2[0]):
-        v1, v2 = v2, v1
-    return np.asarray(v1, float), np.asarray(v2, float)
 
-
-def grow_lattice(pts: np.ndarray, v1: np.ndarray, v2: np.ndarray,
-                 tol: float = 0.34) -> dict[tuple[int, int], int]:
-    """BFS from a central seed, assigning integer (col, row) to each hole.
+def grow_lattice(pts: np.ndarray, v1: np.ndarray, v2: np.ndarray, seed: int,
+                 tree: cKDTree, tol: float = 0.34) -> dict[tuple[int, int], int]:
+    """BFS from `seed`, assigning integer (col, row) to each hole.
 
     Steps of 1 pitch are tried first; a step of 3 along the row axis crosses the
-    centre channel. `tol` is the match radius as a fraction of pitch.
+    centre channel. `tol` is the match radius as a fraction of pitch. Growth is
+    local, so perspective costs nothing and irregular clutter is never reached.
     """
     pitch = float(np.linalg.norm(v2))
-    seed = int(np.argmin(np.linalg.norm(pts - pts.mean(axis=0), axis=1)))
-
     index: dict[int, tuple[int, int]] = {seed: (0, 0)}
     taken: dict[tuple[int, int], int] = {(0, 0): seed}
     queue = deque([seed])
 
     steps = [(1, 0), (-1, 0), (0, 1), (0, -1), (0, 3), (0, -3)]
 
+    # Growth is bounded to the board's own dimensions. Without this, a lattice
+    # can escape into background clutter (desk texture, a keyboard, carpet) and
+    # run for dozens of extra rows, which inflates its coverage score and lets a
+    # wrong basis beat the right one. Bounding every candidate the same way makes
+    # coverage a fair comparison.
+    lo_c = hi_c = lo_r = hi_r = 0
+
     while queue:
         i = queue.popleft()
         ci, ri = index[i]
         p = pts[i]
         for dc, dr in steps:
-            key = (ci + dc, ri + dr)
+            c, r = ci + dc, ri + dr
+            key = (c, r)
             if key in taken:
                 continue
-            target = p + dc * v1 + dr * v2
-            d = np.linalg.norm(pts - target, axis=1)
-            j = int(np.argmin(d))
-            if d[j] > tol * pitch or j in index:
+            if (max(hi_c, c) - min(lo_c, c) + 1 > MAX_COL_SPAN
+                    or max(hi_r, r) - min(lo_r, r) + 1 > MAX_ROW_SPAN):
+                continue
+            d, j = tree.query(p + dc * v1 + dr * v2, k=1,
+                              distance_upper_bound=tol * pitch)
+            if not np.isfinite(d) or j in index:
                 continue
             index[j] = key
             taken[key] = j
+            lo_c, hi_c = min(lo_c, c), max(hi_c, c)
+            lo_r, hi_r = min(lo_r, r), max(hi_r, r)
             queue.append(j)
     return taken
+
+
+def best_lattice(pts: np.ndarray, n_seeds: int = 4
+                 ) -> tuple[dict[tuple[int, int], int], np.ndarray, np.ndarray]:
+    """Try every candidate basis from several seeds; keep the largest lattice.
+
+    Selecting the basis by *how many points it explains* — rather than by peak
+    strength or shortest length — is what stops a spurious sub-pitch peak from
+    being adopted. On cluttered scenes (keyboard, carpet, desk edge) the naive
+    choice locked onto a half-pitch lattice and indexed a single point.
+    """
+    tree = cKDTree(pts)
+    # Seed from the densest neighbourhoods: the board is the one place in the
+    # frame with hundreds of regularly spaced blobs, so density finds it even
+    # when it is a minority of the detections.
+    density = tree.query_ball_point(pts, r=60, return_length=True)
+    seeds = [int(i) for i in np.argsort(density)[::-1][:n_seeds * 40:40]]
+
+    def spans(t: dict[tuple[int, int], int]) -> tuple[int, int]:
+        cs = [c for c, _ in t]
+        rs = [r for _, r in t]
+        return max(cs) - min(cs) + 1, max(rs) - min(rs) + 1
+
+    def plausible(t: dict[tuple[int, int], int]) -> bool:
+        # Hard geometric prior from the board spec: a WB-102 is 63 columns wide
+        # and 12 row-slots deep (a-e, a 3-pitch centre channel, f-j), plus power
+        # rails a few pitches beyond. Anything claiming far more than that is
+        # not the board — it is growth that has escaped into background clutter,
+        # or a diagonal basis inflating both spans. Rejecting on span is what
+        # stops those candidates from winning on coverage alone.
+        c, r = spans(t)
+        return c <= MAX_COL_SPAN and r <= MAX_ROW_SPAN
+
+    scored = []
+    for v1, v2 in lattice_vectors(pts):
+        best_for_basis: dict[tuple[int, int], int] = {}
+        for seed in seeds:
+            taken = grow_lattice(pts, v1, v2, seed, tree)
+            if len(taken) > len(best_for_basis):
+                best_for_basis = taken
+        if best_for_basis:
+            scored.append((best_for_basis, v1, v2))
+    if not scored:
+        raise RuntimeError("no basis produced a lattice")
+
+    # Two-stage choice, and both stages are needed.
+    #
+    # Coverage alone is not enough: the diagonals of a square lattice form
+    # another square, perpendicular lattice with sqrt(2) times the spacing. It
+    # fits a homography perfectly while indexing every *other* hole, and it can
+    # reach further into background clutter, so it often scores higher. Its
+    # cells have twice the area.
+    #
+    # Shortest-basis alone is not enough either: spurious sub-pitch peaks from
+    # desk texture are shorter still, but explain almost nothing.
+    #
+    # So: keep candidates that explain a comparable share of the points, then
+    # among those take the finest lattice — the true basis is the shortest one
+    # that actually works.
+    top = max(len(t) for t, _, _ in scored)
+    viable = [s for s in scored if len(s[0]) >= 0.5 * top]
+    def cell_area(s: tuple) -> float:
+        (ax, ay), (bx, by) = s[1], s[2]
+        return abs(ax * by - ay * bx)
+
+    taken, v1, v2 = min(viable, key=cell_area)
+    return taken, v1, v2
 
 
 def fit_homography(pts: np.ndarray, taken: dict[tuple[int, int], int]):
@@ -159,8 +250,7 @@ def analyse(path: str) -> dict | None:
     if len(pts) < 200:
         return None
 
-    v1, v2 = lattice_vectors(pts)
-    taken = grow_lattice(pts, v1, v2)
+    taken, v1, v2 = best_lattice(pts)
     if len(taken) < 100:
         return None
 

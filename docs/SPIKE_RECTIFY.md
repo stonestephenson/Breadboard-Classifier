@@ -11,8 +11,40 @@ lighting and mild perspective.
 
 ## Verdict
 
-**Promising — proceed, with one known failure mode.** Geometry is not the problem. Anchoring
-and detection robustness are, and both are ordinary engineering.
+**Promising — proceed, with known unfinished work.** Geometry is not the problem: where the fit
+locks onto the right lattice it is accurate to ~1/30th of a hole pitch, against a requirement of
+half a pitch. What is unfinished is *choosing* the right lattice reliably, and anchoring it.
+
+### Update 2026-08-11 — basis selection is not solved
+
+Tested against a real photo of the assembled BasicBoard on a desk (keyboard, carpet, laptop in
+frame, bright LED glow). It failed outright, then failed in a more instructive way.
+
+Three successive selection rules, each fixing the previous and exposing the next:
+
+1. **Shortest strong peak.** Clutter produced 3400 candidate blobs and a spurious ~10 px peak;
+   the fit locked onto it and indexed a single point.
+2. **Best coverage.** Fixed that, but adopted the **diagonal** lattice — the diagonals of a
+   square lattice form another square, perpendicular lattice at sqrt(2) the spacing. It fits a
+   homography perfectly while indexing every *other* hole, so residuals look excellent and the
+   pitch is silently wrong by 41%. It also reaches further into clutter, so it *wins* on
+   coverage. Detected by noticing 29 px became 41.7 px, and 29 x sqrt(2) = 41.0.
+3. **Best coverage, then finest cell among near-ties, with growth bounded to board dimensions.**
+   Correct pitch on 10 of 13 images. Still picks the diagonal on 3, and mis-fits the BasicBoard
+   photo (20 columns for a 63-column board).
+
+**Lesson worth keeping:** low reprojection residual does *not* mean the lattice is right. A
+wrong-but-self-consistent lattice fits perfectly. Validation must check pitch and span against
+the board spec, never residual alone.
+
+**Next approach** — stop patching the selection heuristic. Anchor first, then fit: find the
+board's rail stripes and centre channel (large, coloured, unambiguous, and impossible to confuse
+with desk texture), use them to establish scale and orientation, and only then fit the hole
+lattice within that frame. That also solves the 180-degree ambiguity in the same step, and it
+uses the board-intrinsic features ARCHITECTURE.md already commits to for anchoring.
+
+The infrastructure added along the way is sound and worth keeping: KD-tree neighbour queries,
+multiple candidate bases, multiple seeds, and growth bounded to the board's dimensions.
 
 ## Results
 
