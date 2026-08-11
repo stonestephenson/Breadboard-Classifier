@@ -1,7 +1,8 @@
 {
   "venvPath": ".",
   "venv": "venv",
-  "include": ["spikes"],
+  "include": ["spikes", "tools"],
   "exclude": ["venv", "data", "**/__pycache__"],
-  "reportMissingImports": "error"
+  "reportMissingImports": "error",
+  "reportMissingModuleSource": "none"
 }
