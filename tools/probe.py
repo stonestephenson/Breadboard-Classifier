@@ -98,20 +98,24 @@ class Board:
             raise IOError(f"no reply reading A{ch}")
         return r[0] | (r[1] << 8)
 
-    # --- bit helpers ---------------------------------------------------------
-    def _set_bit(self, reg: int, bit: int, high: bool) -> None:
-        v = self.read_mem(reg)
-        self.write_mem(reg, (v | (1 << bit)) if high else (v & ~(1 << bit)))
-
-    def set_input(self, pin: str, pullup: bool) -> None:
-        _, ddr, port, bit = PINS[pin]
-        self._set_bit(ddr, bit, False)
-        self._set_bit(port, bit, pullup)
-
-    def set_output_low(self, pin: str) -> None:
-        _, ddr, port, bit = PINS[pin]
-        self._set_bit(port, bit, False)
-        self._set_bit(ddr, bit, True)
+    # --- register state ------------------------------------------------------
+    # Registers are always written whole, from state computed in Python. An
+    # earlier version did read-modify-write per pin (~350 round trips for one
+    # scan); a single desynced byte then corrupted a direction register, turned
+    # pins into outputs driving low, and made every pin look shorted to every
+    # other. Whole-register writes with read-back verification remove both the
+    # round-trip count and the failure mode.
+    def write_regs(self, vals: dict[int, int], verify: bool = True) -> None:
+        for reg, v in vals.items():
+            self.write_mem(reg, v)
+        if not verify:
+            return
+        for reg, v in vals.items():
+            got = self.read_mem(reg)
+            if got != v:
+                raise IOError(f"write to 0x{reg:02x} did not stick: "
+                              f"wrote 0b{v:08b}, read back 0b{got:08b} "
+                              f"(serial desync?)")
 
     def read_all(self) -> dict[str, int]:
         """One read per port, then unpack — 3 transactions for every pin."""
@@ -127,34 +131,64 @@ class Board:
             self.write_mem(reg, val)
 
 
-def find_hot_pins(b: Board) -> set[str]:
-    """Pins held HIGH by the circuit itself. Never drive these low."""
-    for p in PROBE_PINS:
-        b.set_input(p, pullup=False)
-    time.sleep(0.05)
-    state = b.read_all()
-    return {p for p in PROBE_PINS if state[p] == 1}
+# Pull-up masks covering exactly the probe pins of each port.
+PULLUP = {PORTB: 0x3F, PORTC: 0x3F, PORTD: 0xFC}  # D8-D13, A0-A5, D2-D7
 
 
-def scan(b: Board, hot: set[str]) -> dict[str, set[str]]:
-    """Drive each safe pin low in turn; any pin reading low shares its node."""
+def make_state(driver: str | None, keep_ddrd: int, keep_portd: int) -> dict[int, int]:
+    """All probe pins INPUT_PULLUP, except `driver` which is OUTPUT LOW.
+
+    D0/D1 bits are carried through from the board's own startup state — they are
+    the serial link and must not be disturbed.
+    """
+    regs = {DDRB: 0x00, DDRC: 0x00, DDRD: keep_ddrd & 0x03,
+            PORTB: PULLUP[PORTB], PORTC: PULLUP[PORTC],
+            PORTD: PULLUP[PORTD] | (keep_portd & 0x03)}
+    if driver:
+        _, ddr, port, bit = PINS[driver]
+        regs[ddr] |= 1 << bit
+        regs[port] &= ~(1 << bit) & 0xFF
+    return regs
+
+
+def scan(b: Board, keep_ddrd: int, keep_portd: int,
+         idle: dict[str, int]) -> tuple[dict[str, set[str]], set[str]]:
+    """Drive each pin low in turn; a pin that *changes* to low shares its node.
+
+    `idle` is the resting state with every pin floating on its pull-up. The
+    comparison against it is essential: pins the circuit already ties low read
+    low no matter what we drive, so without subtracting the baseline they look
+    connected to everything and union-find collapses the whole board into one
+    node. Only a pin that was high at rest and went low because we drove the
+    driver is genuinely joined to it.
+
+    Returns (adjacency, conflicts). A conflict is a pin that stayed HIGH while
+    we drove it LOW — something is forcing it up, so we release it immediately
+    rather than fight a 5V rail through the output driver.
+
+    Limitation: two pins that are *both* tied low at rest cannot be told apart
+    by this method; they are reported together in the resting-low group instead.
+    """
     joined: dict[str, set[str]] = {}
-    for p in PROBE_PINS:
-        b.set_input(p, pullup=True)
-    time.sleep(0.05)
+    conflicts: set[str] = set()
 
     for driver in PROBE_PINS:
-        if driver in hot:
-            continue
-        b.set_output_low(driver)
-        time.sleep(0.01)
+        if idle[driver] == 0:
+            continue  # already low; driving it teaches us nothing
+        b.write_regs(make_state(driver, keep_ddrd, keep_portd))
+        time.sleep(0.005)
         state = b.read_all()
-        b.set_input(driver, pullup=True)
+        # Release the pin before doing anything else with the reading.
+        b.write_regs(make_state(None, keep_ddrd, keep_portd), verify=False)
+
+        if state[driver] == 1:
+            conflicts.add(driver)
+            continue
         partners = {p for p in PROBE_PINS
-                    if p != driver and p not in hot and state[p] == 0}
+                    if p != driver and idle[p] == 1 and state[p] == 0}
         if partners:
             joined[driver] = partners
-    return joined
+    return joined, conflicts
 
 
 def merge_nodes(joined: dict[str, set[str]]) -> list[set[str]]:
@@ -195,6 +229,10 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="list serial ports and exit")
     ap.add_argument("--blink", type=int, metavar="PIN",
                     help="flash a digital pin 5x — confirms we can drive the circuit")
+    ap.add_argument("--sweep", action="store_true",
+                    help="drive pins 2-12 HIGH one at a time; watch which LED lights")
+    ap.add_argument("--hold", type=float, default=1.5, metavar="SEC",
+                    help="seconds to hold each pin during --sweep (default 1.5)")
     ap.add_argument("--verbose", action="store_true", help="show every byte exchanged")
     args = ap.parse_args()
 
@@ -220,32 +258,59 @@ def main() -> int:
         for reg, name in ((PIND, "PIND"), (PINB, "PINB"), (PINC, "PINC")):
             print(f"{name:<14}0b{b.read_mem(reg):08b}   (memory read works)")
 
+        snap = b.snapshot()
+        keep_ddrd, keep_portd = snap[DDRD] & 0x03, snap[PORTD] & 0x03
+
+        if args.sweep:
+            # Uses the sketch's own digitalWrite opcodes rather than memory
+            # pokes: setup() already leaves D2-D10 as outputs, and this is the
+            # exact path the LbyM web app itself drives, so it doubles as a test
+            # of the interface we will use in production.
+            print(f"\ndriving each pin HIGH for {args.hold}s — watch the board\n")
+            try:
+                for pin in range(2, 13):
+                    print(f"  pin {pin:>2} HIGH", flush=True)
+                    b._cmd(bytes([0xE0 + pin]))       # digitalWrite(pin, HIGH)
+                    time.sleep(args.hold)
+                    b._cmd(bytes([0xD0 + pin]))       # digitalWrite(pin, LOW)
+                    time.sleep(0.2)
+            finally:
+                b.restore(snap)
+            print("\nWhich pins lit an LED, and what colour?")
+            return 0
+
         if args.blink is not None:
             pin = f"D{args.blink}"
             print(f"\nblinking {pin} five times — watch the board")
-            snap = b.snapshot()
-            for _ in range(5):
-                b.set_output_low(pin)
-                time.sleep(0.25)
-                _, _, portreg, bit = PINS[pin]
-                b._set_bit(portreg, bit, True)
-                time.sleep(0.25)
-            b.restore(snap)
+            try:
+                for _ in range(5):
+                    b.write_regs(make_state(pin, keep_ddrd, keep_portd), verify=False)
+                    time.sleep(0.25)
+                    b.write_regs(make_state(None, keep_ddrd, keep_portd), verify=False)
+                    time.sleep(0.25)
+            finally:
+                b.restore(snap)
             return 0
 
-        snap = b.snapshot()
         try:
-            hot = find_hot_pins(b)
-            if hot:
-                print(f"\nexternally driven HIGH (not driven low): {', '.join(sorted(hot))}")
-            joined = scan(b, hot)
+            # Baseline: everything floating high on its internal pull-up. Any
+            # pin reading low here is tied low by the circuit.
+            b.write_regs(make_state(None, keep_ddrd, keep_portd))
+            time.sleep(0.05)
+            idle = b.read_all()
+            low = sorted(p for p in PROBE_PINS if idle[p] == 0)
+            print(f"\ntied LOW at rest (share the ground node): {', '.join(low) or '(none)'}")
+
+            joined, conflicts = scan(b, keep_ddrd, keep_portd, idle)
+            if conflicts:
+                print(f"forced HIGH by the circuit (drive aborted): {', '.join(sorted(conflicts))}")
         finally:
             b.restore(snap)
 
-        print("\nconnected pin groups:")
+        print("\npin-to-pin connections found by driving:")
         nodes = merge_nodes(joined)
         if not nodes:
-            print("  (none — no two pins are joined by the circuit)")
+            print("  (none — no two floating pins are joined to each other)")
         for g in nodes:
             print(f"  {' = '.join(sorted(g))}")
 
