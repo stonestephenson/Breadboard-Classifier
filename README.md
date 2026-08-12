@@ -17,8 +17,9 @@ python -m venv venv
 
 ## Try it
 
-Six example circuits live in `examples/`, all built from the BasicBoard's **measured** topology
-(pin 2 drives the red LED, 3 white, 4 green, 5 blue — recovered over USB, not assumed).
+Twelve example circuits live in `examples/`. The BasicBoard ones are built from its **measured**
+topology (pin 2 drives the red LED, 3 white, 4 green, 5 blue — recovered over USB, not assumed);
+the Activity 3 ones come from the curriculum worksheet.
 
 Look at a circuit:
 
@@ -53,6 +54,23 @@ The others are worth running to see the behaviours that matter most:
 | `basicboard_no_resistor.json` | Caught with **no lab file at all** (`check` without `--lab`) |
 | `basicboard_dead_rail.json` | The unpowered half of a split power rail — invisible on the board |
 
+**Activity 3 (Intro to Sensors)** is the first lab with real wiring, and its answer is fixed by
+the worksheet: the light sensor's + to 3V, − to GND, OUT to A0, with three jumper wires placed
+wherever the student likes.
+
+```bash
+./venv/bin/python -m breadboard check examples/activity3_on_5v.json --lab examples/activity3.json
+# -> One leg of the red wire is in the wrong place. Move it from j32 to j31.
+```
+
+| File | The mistake |
+|------|-------------|
+| `activity3_on_5v.json` | Sensor powered from 5V; the data sheet says 3V |
+| `activity3_wrong_analog.json` | Signal wire on A1, but the program only reads A0 |
+| `activity3_sensor_backwards.json` | + and − swapped — can destroy the sensor |
+| `activity3_wire_off_by_one.json` | A wire one column short of the sensor |
+| `activity3_uncertain.json` | The same displacement, read doubtfully |
+
 Placement is free, so a correct circuit built anywhere passes. Try editing a hole number in
 `examples/basicboard.json` — move the whole build ten columns along and it still reports clean.
 Move only one leg and it does not.
@@ -70,7 +88,13 @@ Plug a Metro Mini in over USB (a **data** cable, not charge-only):
 ./venv/bin/python tools/probe.py --list      # find the port
 ./venv/bin/python tools/probe.py             # measure pin connectivity
 ./venv/bin/python tools/probe.py --sweep     # light each LED in turn; watch the board
+./venv/bin/python tools/probe.py --analog    # watch A0-A5 while you change the light
 ```
+
+`--analog` is Activity 3's own acceptance test, measured directly. Continuity cannot see that
+lab at all — a sensor is not a short, so the three jumper wires join nothing a scan detects — but
+the worksheet's criterion is that "the brightness readings change when the light changes", and
+that is measurable. It answers *whether the circuit works*; the checker answers *why it does not*.
 
 This runs against the **shipped** LbyM sketch with no firmware change and needs nothing from the
 web app — see [docs/FIRMWARE_PROTOCOL.md](docs/FIRMWARE_PROTOCOL.md) for how, and for the safety
@@ -89,22 +113,26 @@ Exploratory, and **not finished** — see [docs/SPIKE_RECTIFY.md](docs/SPIKE_REC
 
 | | State |
 |---|---|
-| Circuit model and checker | **Works.** 109 tests. [docs/CHECKER.md](docs/CHECKER.md) |
+| Circuit model and checker | **Works.** 132 tests. [docs/CHECKER.md](docs/CHECKER.md) |
 | Electrical probe | **Works on real hardware.** [docs/FIRMWARE_PROTOCOL.md](docs/FIRMWARE_PROTOCOL.md) |
 | Rectifying a photo | Partly. Fits, but sometimes onto the wrong lattice. [docs/SPIKE_RECTIFY.md](docs/SPIKE_RECTIFY.md) |
 | Photo → circuit | **Not started.** Needs training data. |
 | Probe → circuit | **Not started.** See below. |
-| Lab reference circuits | **Blocked** on curriculum PDFs. |
+| Activity 3 reference circuit | **Done**, from the worksheet. |
+| Activities 1, 4, 5 references | Not authored yet. |
 
 **The two halves do not join up yet.** You can measure a real board, and you can check a circuit,
 but nothing yet turns either a photograph or a probe reading into a `Netlist` for the checker to
 consume. Every example in `examples/` is hand-authored.
 
-Connecting the probe is the smaller of the two gaps and is next. Note it can only ever be
-partial: passive continuity finds *wires* reliably, but a path through an LED and a 330 Ω
-resistor leaves the pin in the chip's undefined input band, so the reading there is arbitrary.
-Identifying which LED sits on which pin needs the `--sweep` stimulus with something watching —
-a person today, the camera eventually.
+What electricity *can* do on its own is answer whether a circuit works: `--sweep` for the LED
+labs, `--analog` for the sensor labs. What it cannot do is say *where* a wire should move, and
+for Activity 3 it cannot see the wiring at all. That gap is the camera's job.
+
+Note too that passive continuity finds *wires* reliably but not component paths: through an LED
+and a 330 Ω resistor the pin sits in the chip's undefined input band, so the reading is arbitrary.
+Identifying which LED is on which pin needs the `--sweep` stimulus with something watching — a
+person today, the camera eventually.
 
 ## Layout
 
@@ -118,6 +146,6 @@ breadboard/     the circuit model and checker — deterministic, fully tested
 tools/probe.py  measure a real board over USB
 spikes/         exploratory photo work, not production
 examples/       runnable circuits, generated by make_examples.py
-tests/          109 tests; test_basicboard.py checks against measured hardware
+tests/          132 tests; test_basicboard.py checks against measured hardware
 docs/           design decisions, open questions, protocol notes, spike results
 ```

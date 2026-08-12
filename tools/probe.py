@@ -161,6 +161,55 @@ def make_state(driver: str | None, keep_ddrd: int, keep_portd: int) -> dict[int,
     return regs
 
 
+def watch_analog(b: Board, seconds: float) -> dict[str, tuple[int, int]]:
+    """Sample A0-A5 while the student changes the light, and report the spread.
+
+    This is the electrical half of Activity 3. Pin-to-pin continuity cannot see
+    that lab at all -- a sensor is not a short, so the three jumper wires join
+    nothing the scan can detect. But the lab's own acceptance criterion is that
+    "the brightness readings change when the light changes", and that is
+    directly measurable. So this answers *whether the circuit works*, and the
+    checker answers *why it does not*.
+    """
+    print(f"\nwatching A0-A5 for {seconds:.0f}s — cover the sensor, then shine a")
+    print("light on it, so we can see which channel responds\n")
+
+    lo = dict.fromkeys(OP_ANALOG, 1023)
+    hi = dict.fromkeys(OP_ANALOG, 0)
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        for ch in OP_ANALOG:
+            v = b.analog_read(ch)
+            lo[ch], hi[ch] = min(lo[ch], v), max(hi[ch], v)
+        bars = "  ".join(f"A{ch}={b.analog_read(ch):4d}" for ch in sorted(OP_ANALOG))
+        print(f"\r  {bars}", end="", flush=True)
+    print("\n")
+    return {f"A{ch}": (lo[ch], hi[ch]) for ch in sorted(OP_ANALOG)}
+
+
+def describe_analog(ranges: dict[str, tuple[int, int]]) -> list[str]:
+    """Turn min/max per channel into a verdict.
+
+    Thresholds are deliberately loose. The point is to separate "this channel
+    is doing something" from "this channel is pinned", not to measure lux.
+    """
+    out = []
+    for name, (lo, hi) in ranges.items():
+        spread = hi - lo
+        if spread >= 30:
+            verdict = f"responding (varied {lo}-{hi})"
+        elif hi <= 20:
+            verdict = f"stuck low ({hi}) — no power reaching it, or OUT tied to ground"
+        elif lo >= 1000:
+            verdict = (
+                f"stuck high ({lo}) — nothing pulling it down; OUT may be unconnected"
+            )
+        else:
+            verdict = f"steady at ~{(lo + hi) // 2}, not responding"
+        out.append(f"  {name}  {verdict}")
+    return out
+
+
 def scan(
     b: Board, keep_ddrd: int, keep_portd: int, idle: dict[str, int]
 ) -> tuple[dict[str, set[str]], set[str]]:
@@ -260,6 +309,15 @@ def main() -> int:
         metavar="SEC",
         help="seconds to hold each pin during --sweep (default 1.5)",
     )
+    ap.add_argument(
+        "--analog",
+        nargs="?",
+        type=float,
+        const=8.0,
+        metavar="SEC",
+        help="watch A0-A5 while you change the light (default 8s). This is "
+        "Activity 3's own acceptance test, measured directly.",
+    )
     ap.add_argument("--verbose", action="store_true", help="show every byte exchanged")
     args = ap.parse_args()
 
@@ -290,6 +348,27 @@ def main() -> int:
 
         snap = b.snapshot()
         keep_ddrd, keep_portd = snap[DDRD] & 0x03, snap[PORTD] & 0x03
+
+        if args.analog is not None:
+            ranges = watch_analog(b, args.analog)
+            print("\n".join(describe_analog(ranges)))
+            responding = [n for n, (lo, hi) in ranges.items() if hi - lo >= 30]
+            print()
+            if "A0" in responding:
+                print("A0 is responding to light, so the sensor circuit works.")
+            elif responding:
+                print(
+                    f"{', '.join(responding)} responded but A0 did not. The lab's "
+                    "program only reads A0, so the signal wire is probably on the "
+                    "wrong analog pin."
+                )
+            else:
+                print(
+                    "Nothing responded. Either the light did not change enough, or "
+                    "the sensor is not wired to the Arduino correctly — check the "
+                    "board against the lab with `python -m breadboard check`."
+                )
+            return 0
 
         if args.sweep:
             # Uses the sketch's own digitalWrite opcodes rather than memory
