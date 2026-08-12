@@ -21,13 +21,23 @@ from breadboard.netlist import (
 
 
 def led(cid="LED1", anode="b24", cathode="b28", **kw):
-    return Component(id=cid, type="led", attrs={"color": "red"},
-                     pins={"anode": Pin(anode), "cathode": Pin(cathode)}, **kw)
+    return Component(
+        id=cid,
+        type="led",
+        attrs={"color": "red"},
+        pins={"anode": Pin(anode), "cathode": Pin(cathode)},
+        **kw,
+    )
 
 
 def resistor(cid="R1", a="d24", b="d20", **kw):
-    return Component(id=cid, type="resistor", attrs={"ohms": 330},
-                     pins={"1": Pin(a), "2": Pin(b)}, **kw)
+    return Component(
+        id=cid,
+        type="resistor",
+        attrs={"ohms": 330},
+        pins={"1": Pin(a), "2": Pin(b)},
+        **kw,
+    )
 
 
 class TestPin:
@@ -64,13 +74,13 @@ class TestComponent:
 
     def test_pin_names_must_match_the_component_type(self):
         with pytest.raises(NetlistError, match="pins"):
-            Component(id="LED1", type="led",
-                      pins={"1": Pin("b24"), "2": Pin("b28")})
+            Component(id="LED1", type="led", pins={"1": Pin("b24"), "2": Pin("b28")})
 
     def test_unknown_component_type_is_rejected(self):
         with pytest.raises(NetlistError, match="type"):
-            Component(id="X1", type="flux_capacitor",
-                      pins={"1": Pin("b24"), "2": Pin("b28")})
+            Component(
+                id="X1", type="flux_capacitor", pins={"1": Pin("b24"), "2": Pin("b28")}
+            )
 
     def test_defaults_to_student_added(self):
         assert led().origin == "student"
@@ -90,8 +100,7 @@ class TestComponent:
         assert c.pins["anode"].node == c.pins["cathode"].node
 
     def test_mcu_pins_are_named_by_the_metro_mini_silkscreen(self):
-        mcu = Component(id="MCU", type="mcu",
-                        pins={"D2": Pin("a10"), "GND": Pin("a12")})
+        mcu = Component(id="MCU", type="mcu", pins={"D2": Pin("a10"), "GND": Pin("a12")})
         assert set(mcu.pins) == {"D2", "GND"}
 
     def test_mcu_rejects_a_pin_the_metro_mini_does_not_have(self):
@@ -120,10 +129,15 @@ class TestNetlist:
             components=[
                 led(origin="factory"),
                 resistor(origin="factory"),
-                Component(id="W1", type="wire", attrs={"color": "black"},
-                          pins={"1": Pin("b28"),
-                                "2": Pin("p1-:12", confidence=0.4,
-                                         alternatives=("p1-:11",))}),
+                Component(
+                    id="W1",
+                    type="wire",
+                    attrs={"color": "black"},
+                    pins={
+                        "1": Pin("b28"),
+                        "2": Pin("p1-:12", confidence=0.4, alternatives=("p1-:11",)),
+                    },
+                ),
             ],
         )
         restored = Netlist.from_json(json.loads(original.to_json()))
@@ -140,11 +154,18 @@ class TestNetlist:
             Netlist.from_json({"board": "WB-999", "components": []})
 
     def test_confidence_survives_the_round_trip(self):
-        n = Netlist(components=[
-            Component(id="W1", type="wire",
-                      pins={"1": Pin("b28"),
-                            "2": Pin("b30", confidence=0.3,
-                                     alternatives=("b29", "b31"))})])
+        n = Netlist(
+            components=[
+                Component(
+                    id="W1",
+                    type="wire",
+                    pins={
+                        "1": Pin("b28"),
+                        "2": Pin("b30", confidence=0.3, alternatives=("b29", "b31")),
+                    },
+                )
+            ]
+        )
         back = Netlist.from_json(json.loads(n.to_json()))
         assert back["W1"].pins["2"].confidence == 0.3
         assert back["W1"].pins["2"].alternatives == ("b29", "b31")

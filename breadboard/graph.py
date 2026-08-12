@@ -71,10 +71,8 @@ class Item:
         if self.type != ref.type or self.polarity != ref.polarity:
             return False
         mine = dict(self.attrs)
-        for key, want in ref.attrs:
-            if key in mine and mine[key] != want:
-                return False
-        return True
+        # A key the reference does not mention is a wildcard, so absent means ok.
+        return all(mine.get(key, want) == want for key, want in ref.attrs)
 
 
 @dataclass(frozen=True)
@@ -95,7 +93,7 @@ class Edge:
         if len(self.items) != len(ref.items):
             return False
         for perm in permutations(self.items):
-            if all(s.compatible_with(r) for s, r in zip(perm, ref.items)):
+            if all(s.compatible_with(r) for s, r in zip(perm, ref.items, strict=True)):
                 return True
         return False
 
@@ -166,8 +164,9 @@ def _item(comp: Component) -> Item:
     return Item(comp.type, attrs, 1 if comp.polarised else 0, comp.id)
 
 
-def find_isomorphism(student: CircuitGraph,
-                     reference: CircuitGraph) -> dict[str, str] | None:
+def find_isomorphism(
+    student: CircuitGraph, reference: CircuitGraph
+) -> dict[str, str] | None:
     """Map student nodes onto reference nodes, or None if no mapping exists.
 
     Nodes carrying MCU pins are forced to their namesakes; the rest are searched
@@ -197,9 +196,13 @@ def find_isomorphism(student: CircuitGraph,
     return _search(student, reference, mapping, free, candidates)
 
 
-def _search(student: CircuitGraph, reference: CircuitGraph,
-            mapping: dict[str, str], free: list[str],
-            candidates: list[str]) -> dict[str, str] | None:
+def _search(
+    student: CircuitGraph,
+    reference: CircuitGraph,
+    mapping: dict[str, str],
+    free: list[str],
+    candidates: list[str],
+) -> dict[str, str] | None:
     if not free:
         return dict(mapping) if _edges_agree(student, reference, mapping) else None
 
@@ -209,8 +212,9 @@ def _search(student: CircuitGraph, reference: CircuitGraph,
             continue
         mapping[node] = cand
         if _partial_ok(student, reference, mapping):
-            got = _search(student, reference, mapping, rest,
-                          [c for c in candidates if c != cand])
+            got = _search(
+                student, reference, mapping, rest, [c for c in candidates if c != cand]
+            )
             if got is not None:
                 return got
         del mapping[node]
@@ -236,8 +240,9 @@ def _consume(edge: Edge, pool: list[Edge]) -> bool:
     return False
 
 
-def _edges_agree(student: CircuitGraph, reference: CircuitGraph,
-                 mapping: dict[str, str]) -> bool:
+def _edges_agree(
+    student: CircuitGraph, reference: CircuitGraph, mapping: dict[str, str]
+) -> bool:
     mapped = _mapped_edges(student, mapping)
     if mapped is None:
         return False
@@ -245,18 +250,24 @@ def _edges_agree(student: CircuitGraph, reference: CircuitGraph,
     return all(_consume(e, pool) for e in mapped) and not pool
 
 
-def _partial_ok(student: CircuitGraph, reference: CircuitGraph,
-                mapping: dict[str, str]) -> bool:
+def _partial_ok(
+    student: CircuitGraph, reference: CircuitGraph, mapping: dict[str, str]
+) -> bool:
     """Cheap prune: every fully-mapped edge so far must have a partner."""
     pool = list(reference.edges)
     for e in student.edges:
-        if (e.a in mapping and e.b in mapping
-                and not _consume(Edge(mapping[e.a], mapping[e.b], e.items), pool)):
+        if (
+            e.a in mapping
+            and e.b in mapping
+            and not _consume(Edge(mapping[e.a], mapping[e.b], e.items), pool)
+        ):
             return False
     return True
 
 
 def equivalent(student: Netlist, reference: Netlist) -> bool:
     """True when both netlists describe the same working circuit."""
-    return find_isomorphism(build(student).collapsed(),
-                            build(reference).collapsed()) is not None
+    return (
+        find_isomorphism(build(student).collapsed(), build(reference).collapsed())
+        is not None
+    )

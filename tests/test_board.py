@@ -84,26 +84,32 @@ class TestNodeInventory:
 
 
 class TestParsing:
-    @pytest.mark.parametrize("hole,expected", [
-        ("a1", ("a", 1)),
-        ("j63", ("j", 63)),
-        ("C24", ("c", 24)),  # accept upper case; students and authors will vary
-    ])
+    @pytest.mark.parametrize(
+        "hole,expected",
+        [
+            ("a1", ("a", 1)),
+            ("j63", ("j", 63)),
+            ("C24", ("c", 24)),  # accept upper case; students and authors will vary
+        ],
+    )
     def test_terminal_holes_parse(self, hole, expected):
         assert parse_hole(hole) == expected
 
-    @pytest.mark.parametrize("hole", [
-        "k1",       # no such row
-        "a0",       # columns are 1-based
-        "a64",      # past the end of the board
-        "a",        # no column
-        "24",       # no row
-        "p3+:1",    # no such rail
-        "p1+:0",
-        "p1+:51",
-        "p1+",      # rail without a hole index
-        "",
-    ])
+    @pytest.mark.parametrize(
+        "hole",
+        [
+            "k1",  # no such row
+            "a0",  # columns are 1-based
+            "a64",  # past the end of the board
+            "a",  # no column
+            "24",  # no row
+            "p3+:1",  # no such rail
+            "p1+:0",
+            "p1+:51",
+            "p1+",  # rail without a hole index
+            "",
+        ],
+    )
     def test_invalid_holes_are_rejected(self, hole):
         with pytest.raises(BoardError):
             parse_hole(hole)

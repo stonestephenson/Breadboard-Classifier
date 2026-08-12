@@ -16,14 +16,16 @@ from breadboard.netlist import Component, Netlist, Pin
 
 
 def mcu(**pins):
-    return Component(id="MCU", type="mcu",
-                     pins={k: Pin(v) for k, v in pins.items()}, origin="factory")
+    return Component(
+        id="MCU", type="mcu", pins={k: Pin(v) for k, v in pins.items()}, origin="factory"
+    )
 
 
 def two(cid, ctype, a, b, **attrs):
     names = {"led": ("anode", "cathode")}.get(ctype, ("1", "2"))
-    return Component(id=cid, type=ctype, attrs=attrs,
-                     pins={names[0]: Pin(a), names[1]: Pin(b)})
+    return Component(
+        id=cid, type=ctype, attrs=attrs, pins={names[0]: Pin(a), names[1]: Pin(b)}
+    )
 
 
 def blink_circuit(pin_col=10, mid_col=20, gnd_col=30, swap=False, reverse_led=False):
@@ -35,8 +37,7 @@ def blink_circuit(pin_col=10, mid_col=20, gnd_col=30, swap=False, reverse_led=Fa
     a, b = f"a{mid_col}", f"a{gnd_col}"
     first, second = ("led", "resistor") if swap else ("resistor", "led")
     parts = []
-    for cid, ctype, p, q in [("C1", first, f"a{pin_col}", a),
-                             ("C2", second, a, b)]:
+    for cid, ctype, p, q in [("C1", first, f"a{pin_col}", a), ("C2", second, a, b)]:
         if ctype == "led" and reverse_led:
             p, q = q, p
         attrs = {"color": "red"} if ctype == "led" else {"ohms": 330}
@@ -79,28 +80,34 @@ class TestSeriesCollapse:
     def test_a_junction_node_is_not_collapsed(self):
         # Two LEDs sharing a node: that node has degree 3, so it is a real
         # junction and must survive.
-        n = Netlist(components=[
-            mcu(D2="a10", D3="a12", GND="a30"),
-            two("R1", "resistor", "a10", "a20", ohms=330),
-            two("L1", "led", "a20", "a30", color="red"),
-            two("L2", "led", "a20", "a12", color="blue"),
-        ])
+        n = Netlist(
+            components=[
+                mcu(D2="a10", D3="a12", GND="a30"),
+                two("R1", "resistor", "a10", "a20", ohms=330),
+                two("L1", "led", "a20", "a30", color="red"),
+                two("L2", "led", "a20", "a12", color="blue"),
+            ]
+        )
         assert "T:ae:20" in build(n).collapsed().node_set()
 
     def test_a_labelled_node_is_never_collapsed(self):
         # Even at degree 2, a node carrying an MCU pin is a fixed anchor.
-        n = Netlist(components=[
-            mcu(D2="a10", D3="a20", GND="a30"),
-            two("R1", "resistor", "a10", "a20", ohms=330),
-            two("L1", "led", "a20", "a30", color="red"),
-        ])
+        n = Netlist(
+            components=[
+                mcu(D2="a10", D3="a20", GND="a30"),
+                two("R1", "resistor", "a10", "a20", ohms=330),
+                two("L1", "led", "a20", "a30", color="red"),
+            ]
+        )
         assert "T:ae:20" in build(n).collapsed().node_set()
 
 
 class TestEquivalence:
     def test_the_same_circuit_built_elsewhere_on_the_board_matches(self):
-        assert equivalent(blink_circuit(pin_col=10, mid_col=20, gnd_col=30),
-                          blink_circuit(pin_col=10, mid_col=45, gnd_col=52))
+        assert equivalent(
+            blink_circuit(pin_col=10, mid_col=20, gnd_col=30),
+            blink_circuit(pin_col=10, mid_col=45, gnd_col=52),
+        )
 
     def test_resistor_on_either_side_of_the_led_matches(self):
         # The case that killed plain graph isomorphism. Both work; both must pass.
@@ -138,20 +145,35 @@ class TestEquivalence:
 
     def test_wire_colour_is_never_significant(self):
         # The curriculum team confirmed colours are conventions, not rules.
-        a = Netlist(components=[mcu(D2="a10", GND="a30"),
-                                two("W1", "wire", "a10", "a30", color="red")])
-        b = Netlist(components=[mcu(D2="a10", GND="a30"),
-                                two("W1", "wire", "a10", "a30", color="green")])
+        a = Netlist(
+            components=[
+                mcu(D2="a10", GND="a30"),
+                two("W1", "wire", "a10", "a30", color="red"),
+            ]
+        )
+        b = Netlist(
+            components=[
+                mcu(D2="a10", GND="a30"),
+                two("W1", "wire", "a10", "a30", color="green"),
+            ]
+        )
         assert equivalent(a, b)
 
 
 class TestIsomorphism:
     def test_returns_the_node_mapping(self):
-        m = find_isomorphism(build(blink_circuit(mid_col=20)).collapsed(),
-                             build(blink_circuit(mid_col=45)).collapsed())
+        m = find_isomorphism(
+            build(blink_circuit(mid_col=20)).collapsed(),
+            build(blink_circuit(mid_col=45)).collapsed(),
+        )
         assert m is not None
         assert m["T:ae:10"] == "T:ae:10"
 
     def test_returns_none_when_there_is_no_match(self):
-        assert find_isomorphism(build(blink_circuit()).collapsed(),
-                                build(blink_circuit(reverse_led=True)).collapsed()) is None
+        assert (
+            find_isomorphism(
+                build(blink_circuit()).collapsed(),
+                build(blink_circuit(reverse_led=True)).collapsed(),
+            )
+            is None
+        )

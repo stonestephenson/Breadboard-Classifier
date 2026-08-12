@@ -18,27 +18,41 @@ LED_PINS = ("anode", "cathode")
 
 
 def mcu(**pins):
-    return Component(id="MCU", type="mcu", origin="factory",
-                     pins={k: Pin(v) for k, v in pins.items()})
+    return Component(
+        id="MCU", type="mcu", origin="factory", pins={k: Pin(v) for k, v in pins.items()}
+    )
 
 
 def part(cid, ctype, a, b, origin="student", **attrs):
     names = LED_PINS if ctype == "led" else RESISTOR_PINS
     a_pin = a if isinstance(a, Pin) else Pin(a)
     b_pin = b if isinstance(b, Pin) else Pin(b)
-    return Component(id=cid, type=ctype, attrs=attrs, origin=origin,
-                     pins={names[0]: a_pin, names[1]: b_pin})
+    return Component(
+        id=cid,
+        type=ctype,
+        attrs=attrs,
+        origin=origin,
+        pins={names[0]: a_pin, names[1]: b_pin},
+    )
 
 
-def blink(led_from: str | Pin = "a20", led_to: str | Pin = "a30",
-          res_from: str | Pin = "a10", res_to: str | Pin = "a20",
-          origin: str = "student", color: str = "red") -> Netlist:
+def blink(
+    led_from: str | Pin = "a20",
+    led_to: str | Pin = "a30",
+    res_from: str | Pin = "a10",
+    res_to: str | Pin = "a20",
+    origin: str = "student",
+    color: str = "red",
+) -> Netlist:
     """D2 -> 330R -> red LED -> GND. The canonical one-LED lab."""
-    return Netlist(name="blink", components=[
-        mcu(D2="a10", GND="a30"),
-        part("R1", "resistor", res_from, res_to, origin=origin, ohms=330),
-        part("L1", "led", led_from, led_to, origin=origin, color=color),
-    ])
+    return Netlist(
+        name="blink",
+        components=[
+            mcu(D2="a10", GND="a30"),
+            part("R1", "resistor", res_from, res_to, origin=origin, ohms=330),
+            part("L1", "led", led_from, led_to, origin=origin, color=color),
+        ],
+    )
 
 
 def kinds(findings):
@@ -50,17 +64,19 @@ class TestCorrectBuilds:
         assert check(blink(), blink()) == []
 
     def test_the_same_circuit_built_elsewhere_is_clean(self):
-        elsewhere = blink(res_from="a44", res_to="a50",
-                          led_from="a50", led_to="a58")
+        elsewhere = blink(res_from="a44", res_to="a50", led_from="a50", led_to="a58")
         elsewhere.components[0] = mcu(D2="a44", GND="a58")
         assert check(elsewhere, blink()) == []
 
     def test_components_reordered_in_series_is_clean(self):
-        swapped = Netlist(name="blink", components=[
-            mcu(D2="a10", GND="a30"),
-            part("L1", "led", "a10", "a20", color="red"),
-            part("R1", "resistor", "a20", "a30", ohms=330),
-        ])
+        swapped = Netlist(
+            name="blink",
+            components=[
+                mcu(D2="a10", GND="a30"),
+                part("L1", "led", "a10", "a20", color="red"),
+                part("R1", "resistor", "a20", "a30", ohms=330),
+            ],
+        )
         assert check(swapped, blink()) == []
 
 
@@ -140,46 +156,65 @@ class TestScopeTagging:
         assert f.scope == "baseline"
 
     def test_a_student_added_part_is_tagged_lab(self):
-        f = next(f for f in check(blink(led_from="a21"), blink())
-                 if f.kind == "wrong_connection")
+        f = next(
+            f
+            for f in check(blink(led_from="a21"), blink())
+            if f.kind == "wrong_connection"
+        )
         assert f.scope == "lab"
 
 
 class TestSanityRulesWithoutAReference:
     def test_a_component_with_both_legs_in_one_strip_is_shorted(self):
-        n = Netlist(components=[mcu(D2="a10", GND="a30"),
-                                part("L1", "led", "a20", "c20", color="red")])
+        n = Netlist(
+            components=[
+                mcu(D2="a10", GND="a30"),
+                part("L1", "led", "a20", "c20", color="red"),
+            ]
+        )
         assert "shorted_component" in kinds(check(n))
 
     def test_an_led_straight_across_power_has_no_resistor(self):
-        n = Netlist(components=[mcu(D2="a10", GND="a30"),
-                                part("L1", "led", "a10", "a30", color="red")])
+        n = Netlist(
+            components=[
+                mcu(D2="a10", GND="a30"),
+                part("L1", "led", "a10", "a30", color="red"),
+            ]
+        )
         assert "led_without_resistor" in kinds(check(n))
 
     def test_a_resistor_in_series_clears_that_rule(self):
         assert "led_without_resistor" not in kinds(check(blink()))
 
     def test_power_wired_straight_to_ground_is_a_short(self):
-        n = Netlist(components=[mcu(**{"5V": "a10", "GND": "a30"}),
-                                part("W1", "wire", "a10", "a30")])
+        n = Netlist(
+            components=[
+                mcu(**{"5V": "a10", "GND": "a30"}),
+                part("W1", "wire", "a10", "a30"),
+            ]
+        )
         assert "short_circuit" in kinds(check(n))
 
     def test_the_far_half_of_a_split_rail_is_flagged(self):
         # The WB-102's rails are two separate runs. Power goes into one half,
         # the LED is wired to the other, and nothing works for no visible reason.
-        n = Netlist(components=[
-            mcu(**{"5V": "p1+:5", "GND": "a30"}),
-            part("R1", "resistor", "p1+:40", "a20", ohms=330),
-            part("L1", "led", "a20", "a30", color="red"),
-        ])
+        n = Netlist(
+            components=[
+                mcu(**{"5V": "p1+:5", "GND": "a30"}),
+                part("R1", "resistor", "p1+:40", "a20", ohms=330),
+                part("L1", "led", "a20", "a30", color="red"),
+            ]
+        )
         assert "dead_rail_segment" in kinds(check(n))
 
     def test_using_the_powered_half_of_a_rail_is_fine(self):
-        n = Netlist(components=[
-            mcu(**{"5V": "p1+:5", "GND": "a30"}),
-            part("R1", "resistor", "p1+:20", "a20", ohms=330),
-            part("L1", "led", "a20", "a30", color="red"),
-        ])
+        n = Netlist(
+            components=[
+                mcu(**{"5V": "p1+:5", "GND": "a30"}),
+                part("R1", "resistor", "p1+:20", "a20", ohms=330),
+                part("L1", "led", "a20", "a30", color="red"),
+            ]
+        )
         assert "dead_rail_segment" not in kinds(check(n))
 
 

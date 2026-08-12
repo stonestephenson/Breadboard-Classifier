@@ -1,0 +1,39 @@
+[project]
+name = "breadboard-classifier"
+version = "0.1.0"
+description = "Diagnose student breadboard circuits from a photo and the board itself"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "pillow",
+    "pillow-heif",
+    "pyserial",
+    "scipy",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["breadboard"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 90
+extend-exclude = ["venv", "data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PIE", "BLE", "S"]
+ignore = ["S101"]  # assert is the point of a test suite
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+"spikes/*" = ["S311"]

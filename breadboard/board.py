@@ -90,9 +90,7 @@ def node_of(hole: str) -> str:
 
 def nodes() -> list[str]:
     """Every electrical node on the board, in a stable order."""
-    out = [f"T:{half}:{col}"
-           for col in range(1, N_COLS + 1)
-           for half in ("ae", "fj")]
+    out = [f"T:{half}:{col}" for col in range(1, N_COLS + 1) for half in ("ae", "fj")]
     out += [f"R:{rail}:{seg}" for rail in RAILS for seg in (1, 2)]
     return out
 

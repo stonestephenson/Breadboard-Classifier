@@ -113,14 +113,19 @@ class Board:
         for reg, v in vals.items():
             got = self.read_mem(reg)
             if got != v:
-                raise OSError(f"write to 0x{reg:02x} did not stick: "
-                              f"wrote 0b{v:08b}, read back 0b{got:08b} "
-                              f"(serial desync?)")
+                raise OSError(
+                    f"write to 0x{reg:02x} did not stick: "
+                    f"wrote 0b{v:08b}, read back 0b{got:08b} "
+                    f"(serial desync?)"
+                )
 
     def read_all(self) -> dict[str, int]:
         """One read per port, then unpack — 3 transactions for every pin."""
-        regs = {PINB: self.read_mem(PINB), PINC: self.read_mem(PINC),
-                PIND: self.read_mem(PIND)}
+        regs = {
+            PINB: self.read_mem(PINB),
+            PINC: self.read_mem(PINC),
+            PIND: self.read_mem(PIND),
+        }
         return {p: (regs[PINS[p][0]] >> PINS[p][3]) & 1 for p in PINS}
 
     def snapshot(self) -> dict[int, int]:
@@ -141,9 +146,14 @@ def make_state(driver: str | None, keep_ddrd: int, keep_portd: int) -> dict[int,
     D0/D1 bits are carried through from the board's own startup state — they are
     the serial link and must not be disturbed.
     """
-    regs = {DDRB: 0x00, DDRC: 0x00, DDRD: keep_ddrd & 0x03,
-            PORTB: PULLUP[PORTB], PORTC: PULLUP[PORTC],
-            PORTD: PULLUP[PORTD] | (keep_portd & 0x03)}
+    regs = {
+        DDRB: 0x00,
+        DDRC: 0x00,
+        DDRD: keep_ddrd & 0x03,
+        PORTB: PULLUP[PORTB],
+        PORTC: PULLUP[PORTC],
+        PORTD: PULLUP[PORTD] | (keep_portd & 0x03),
+    }
     if driver:
         _, ddr, port, bit = PINS[driver]
         regs[ddr] |= 1 << bit
@@ -151,8 +161,9 @@ def make_state(driver: str | None, keep_ddrd: int, keep_portd: int) -> dict[int,
     return regs
 
 
-def scan(b: Board, keep_ddrd: int, keep_portd: int,
-         idle: dict[str, int]) -> tuple[dict[str, set[str]], set[str]]:
+def scan(
+    b: Board, keep_ddrd: int, keep_portd: int, idle: dict[str, int]
+) -> tuple[dict[str, set[str]], set[str]]:
     """Drive each pin low in turn; a pin that *changes* to low shares its node.
 
     `idle` is the resting state with every pin floating on its pull-up. The
@@ -184,8 +195,9 @@ def scan(b: Board, keep_ddrd: int, keep_portd: int,
         if state[driver] == 1:
             conflicts.add(driver)
             continue
-        partners = {p for p in PROBE_PINS
-                    if p != driver and idle[p] == 1 and state[p] == 0}
+        partners = {
+            p for p in PROBE_PINS if p != driver and idle[p] == 1 and state[p] == 0
+        }
         if partners:
             joined[driver] = partners
     return joined, conflicts
@@ -217,22 +229,37 @@ def merge_nodes(joined: dict[str, set[str]]) -> list[set[str]]:
 def autodetect() -> str | None:
     for p in serial.tools.list_ports.comports():
         blob = f"{p.device} {p.description} {p.manufacturer or ''}".lower()
-        if any(k in blob for k in ("usbmodem", "usbserial", "wchusb", "arduino", "metro")):
+        if any(
+            k in blob for k in ("usbmodem", "usbserial", "wchusb", "arduino", "metro")
+        ):
             return p.device
     return None
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--port")
     ap.add_argument("--list", action="store_true", help="list serial ports and exit")
-    ap.add_argument("--blink", type=int, metavar="PIN",
-                    help="flash a digital pin 5x — confirms we can drive the circuit")
-    ap.add_argument("--sweep", action="store_true",
-                    help="drive pins 2-12 HIGH one at a time; watch which LED lights")
-    ap.add_argument("--hold", type=float, default=1.5, metavar="SEC",
-                    help="seconds to hold each pin during --sweep (default 1.5)")
+    ap.add_argument(
+        "--blink",
+        type=int,
+        metavar="PIN",
+        help="flash a digital pin 5x — confirms we can drive the circuit",
+    )
+    ap.add_argument(
+        "--sweep",
+        action="store_true",
+        help="drive pins 2-12 HIGH one at a time; watch which LED lights",
+    )
+    ap.add_argument(
+        "--hold",
+        type=float,
+        default=1.5,
+        metavar="SEC",
+        help="seconds to hold each pin during --sweep (default 1.5)",
+    )
     ap.add_argument("--verbose", action="store_true", help="show every byte exchanged")
     args = ap.parse_args()
 
@@ -252,8 +279,11 @@ def main() -> int:
     print(f"port          {port}")
     b = Board(port, verbose=args.verbose)
     try:
-        print(f"banner        {'OK! seen' if b.banner_seen else 'not seen (may be fine)'}")
-        print(f"ping          {'OK (0x30)' if b.ping() else 'NO REPLY — wrong sketch or port?'}")
+        print(
+            f"banner        {'OK! seen' if b.banner_seen else 'not seen (may be fine)'}"
+        )
+        pong = "OK (0x30)" if b.ping() else "NO REPLY — wrong sketch or port?"
+        print(f"ping          {pong}")
 
         for reg, name in ((PIND, "PIND"), (PINB, "PINB"), (PINC, "PINC")):
             print(f"{name:<14}0b{b.read_mem(reg):08b}   (memory read works)")
@@ -270,9 +300,9 @@ def main() -> int:
             try:
                 for pin in range(2, 13):
                     print(f"  pin {pin:>2} HIGH", flush=True)
-                    b._cmd(bytes([0xE0 + pin]))       # digitalWrite(pin, HIGH)
+                    b._cmd(bytes([0xE0 + pin]))  # digitalWrite(pin, HIGH)
                     time.sleep(args.hold)
-                    b._cmd(bytes([0xD0 + pin]))       # digitalWrite(pin, LOW)
+                    b._cmd(bytes([0xD0 + pin]))  # digitalWrite(pin, LOW)
                     time.sleep(0.2)
             finally:
                 b.restore(snap)
@@ -299,11 +329,17 @@ def main() -> int:
             time.sleep(0.05)
             idle = b.read_all()
             low = sorted(p for p in PROBE_PINS if idle[p] == 0)
-            print(f"\ntied LOW at rest (share the ground node): {', '.join(low) or '(none)'}")
+            print(
+                f"\ntied LOW at rest (share the ground node): "
+                f"{', '.join(low) or '(none)'}"
+            )
 
             joined, conflicts = scan(b, keep_ddrd, keep_portd, idle)
             if conflicts:
-                print(f"forced HIGH by the circuit (drive aborted): {', '.join(sorted(conflicts))}")
+                print(
+                    f"forced HIGH by the circuit (drive aborted): "
+                    f"{', '.join(sorted(conflicts))}"
+                )
         finally:
             b.restore(snap)
 

@@ -25,6 +25,7 @@ def basicboard(origin="factory", shift=0, reverse=None, move=None):
     `shift` slides the whole build along the board, which must change nothing.
     `reverse` flips one LED. `move` displaces one LED's anode by a column.
     """
+
     def col(n):
         return n + shift
 
@@ -35,15 +36,27 @@ def basicboard(origin="factory", shift=0, reverse=None, move=None):
     for i, colour in enumerate(LED_PINS.values()):
         pin_col, mid_col = col(40 + i * 2), col(10 + i * 2)
         anode_col = mid_col + (1 if move == colour else 0)
-        parts.append(Component(
-            id=f"R_{colour}", type="resistor", origin=origin, attrs={"ohms": 330},
-            pins={"1": Pin(f"j{pin_col}"), "2": Pin(f"j{mid_col}")}))
+        parts.append(
+            Component(
+                id=f"R_{colour}",
+                type="resistor",
+                origin=origin,
+                attrs={"ohms": 330},
+                pins={"1": Pin(f"j{pin_col}"), "2": Pin(f"j{mid_col}")},
+            )
+        )
         anode, cathode = Pin(f"j{anode_col}"), Pin(f"j{col(56)}")
         if reverse == colour:
             anode, cathode = cathode, anode
-        parts.append(Component(
-            id=f"LED_{colour}", type="led", origin=origin, attrs={"color": colour},
-            pins={"anode": anode, "cathode": cathode}))
+        parts.append(
+            Component(
+                id=f"LED_{colour}",
+                type="led",
+                origin=origin,
+                attrs={"color": colour},
+                pins={"anode": anode, "cathode": cathode},
+            )
+        )
 
     return Netlist(name="basicboard", components=parts)
 
@@ -102,10 +115,18 @@ def with_student_led(anode_col=30):
     board = basicboard()
     board["MCU"].pins["D6"] = Pin("j34")
     board.components += [
-        Component(id="R_student", type="resistor", attrs={"ohms": 330},
-                  pins={"1": Pin("j34"), "2": Pin(f"j{anode_col}")}),
-        Component(id="LED_student", type="led", attrs={"color": "orange"},
-                  pins={"anode": Pin(f"j{anode_col}"), "cathode": Pin("j56")}),
+        Component(
+            id="R_student",
+            type="resistor",
+            attrs={"ohms": 330},
+            pins={"1": Pin("j34"), "2": Pin(f"j{anode_col}")},
+        ),
+        Component(
+            id="LED_student",
+            type="led",
+            attrs={"color": "orange"},
+            pins={"anode": Pin(f"j{anode_col}"), "cathode": Pin("j56")},
+        ),
     ]
     return board
 
@@ -126,15 +147,22 @@ class TestStudentAdditions:
         # That is the same (non-)circuit either way, so there is nothing to fix.
         a, b = basicboard(), basicboard()
         for board, col in ((a, 30), (b, 31)):
-            board.components.append(Component(
-                id="LED_loose", type="led", attrs={"color": "orange"},
-                pins={"anode": Pin(f"j{col}"), "cathode": Pin("j56")}))
+            board.components.append(
+                Component(
+                    id="LED_loose",
+                    type="led",
+                    attrs={"color": "orange"},
+                    pins={"anode": Pin(f"j{col}"), "cathode": Pin("j56")},
+                )
+            )
         assert check(a, b) == []
 
     def test_a_wire_into_the_dead_half_of_a_rail_is_caught(self):
         board = basicboard()
         board["MCU"].pins["5V"] = Pin("p1+:5")
-        board.components.append(Component(
-            id="W_student", type="wire",
-            pins={"1": Pin("p1+:40"), "2": Pin("j20")}))
+        board.components.append(
+            Component(
+                id="W_student", type="wire", pins={"1": Pin("p1+:40"), "2": Pin("j20")}
+            )
+        )
         assert "dead_rail_segment" in [f.kind for f in check(board)]

@@ -56,8 +56,9 @@ MAX_COL_SPAN = 72
 MAX_ROW_SPAN = 22
 
 
-def lattice_vectors(pts: np.ndarray, radius: int = 110, n_peaks: int = 6
-                    ) -> list[tuple[np.ndarray, np.ndarray]]:
+def lattice_vectors(
+    pts: np.ndarray, radius: int = 110, n_peaks: int = 6
+) -> list[tuple[np.ndarray, np.ndarray]]:
     """Recover the two lattice basis vectors by point-set autocorrelation.
 
     Histogram every pairwise displacement shorter than `radius`. A regular grid
@@ -72,7 +73,7 @@ def lattice_vectors(pts: np.ndarray, radius: int = 110, n_peaks: int = 6
     R = radius
     acc = np.zeros((2 * R + 1, 2 * R + 1), np.float32)
     for i in range(0, len(pts), 400):
-        d = (pts[i:i + 400, None, :] - pts[None, :, :]).reshape(-1, 2)
+        d = (pts[i : i + 400, None, :] - pts[None, :, :]).reshape(-1, 2)
         m = (np.abs(d[:, 0]) <= R) & (np.abs(d[:, 1]) <= R)
         d = d[m]
         xi = np.round(d[:, 0]).astype(np.int32) + R
@@ -80,7 +81,7 @@ def lattice_vectors(pts: np.ndarray, radius: int = 110, n_peaks: int = 6
         np.add.at(acc, (yi, xi), 1.0)
 
     acc = cv2.GaussianBlur(acc, (0, 0), 1.3)
-    yy, xx = np.mgrid[-R:R + 1, -R:R + 1]
+    yy, xx = np.mgrid[-R : R + 1, -R : R + 1]
     rr = np.hypot(xx, yy)
     acc[rr < 7] = 0  # self-pairs and sub-pitch noise
 
@@ -115,8 +116,14 @@ def lattice_vectors(pts: np.ndarray, radius: int = 110, n_peaks: int = 6
     return [(np.asarray(u, float), np.asarray(v, float)) for u, v in cands]
 
 
-def grow_lattice(pts: np.ndarray, v1: np.ndarray, v2: np.ndarray, seed: int,
-                 tree: KDTree, tol: float = 0.34) -> dict[tuple[int, int], int]:
+def grow_lattice(
+    pts: np.ndarray,
+    v1: np.ndarray,
+    v2: np.ndarray,
+    seed: int,
+    tree: KDTree,
+    tol: float = 0.34,
+) -> dict[tuple[int, int], int]:
     """BFS from `seed`, assigning integer (col, row) to each hole.
 
     Steps of 1 pitch are tried first; a step of 3 along the row axis crosses the
@@ -146,11 +153,14 @@ def grow_lattice(pts: np.ndarray, v1: np.ndarray, v2: np.ndarray, seed: int,
             key = (c, r)
             if key in taken:
                 continue
-            if (max(hi_c, c) - min(lo_c, c) + 1 > MAX_COL_SPAN
-                    or max(hi_r, r) - min(lo_r, r) + 1 > MAX_ROW_SPAN):
+            if (
+                max(hi_c, c) - min(lo_c, c) + 1 > MAX_COL_SPAN
+                or max(hi_r, r) - min(lo_r, r) + 1 > MAX_ROW_SPAN
+            ):
                 continue
-            d, hit = tree.query(p + dc * v1 + dr * v2, k=1,
-                                distance_upper_bound=tol * pitch)
+            d, hit = tree.query(
+                p + dc * v1 + dr * v2, k=1, distance_upper_bound=tol * pitch
+            )
             if not np.isfinite(d):
                 continue
             j = int(hit)
@@ -164,8 +174,9 @@ def grow_lattice(pts: np.ndarray, v1: np.ndarray, v2: np.ndarray, seed: int,
     return taken
 
 
-def best_lattice(pts: np.ndarray, n_seeds: int = 4
-                 ) -> tuple[dict[tuple[int, int], int], np.ndarray, np.ndarray]:
+def best_lattice(
+    pts: np.ndarray, n_seeds: int = 4
+) -> tuple[dict[tuple[int, int], int], np.ndarray, np.ndarray]:
     """Try every candidate basis from several seeds; keep the largest lattice.
 
     Selecting the basis by *how many points it explains* — rather than by peak
@@ -178,7 +189,7 @@ def best_lattice(pts: np.ndarray, n_seeds: int = 4
     # frame with hundreds of regularly spaced blobs, so density finds it even
     # when it is a minority of the detections.
     density = tree.query_ball_point(pts, r=60, return_length=True)
-    seeds = [int(i) for i in np.argsort(density)[::-1][:n_seeds * 40:40]]
+    seeds = [int(i) for i in np.argsort(density)[::-1][: n_seeds * 40 : 40]]
 
     scored = []
     for v1, v2 in lattice_vectors(pts):
@@ -208,6 +219,7 @@ def best_lattice(pts: np.ndarray, n_seeds: int = 4
     # that actually works.
     top = max(len(t) for t, _, _ in scored)
     viable = [s for s in scored if len(s[0]) >= 0.5 * top]
+
     def cell_area(s: tuple) -> float:
         (ax, ay), (bx, by) = s[1], s[2]
         return abs(ax * by - ay * bx)
@@ -221,8 +233,8 @@ def fit_homography(pts: np.ndarray, taken: dict[tuple[int, int], int]):
     dst = np.array([pts[i] for i in taken.values()], dtype=np.float64)
     H, mask = cv2.findHomography(src, dst, cv2.RANSAC, 3.0)
     resid = np.linalg.norm(
-        cv2.perspectiveTransform(src.reshape(-1, 1, 2), H).reshape(-1, 2) - dst,
-        axis=1)
+        cv2.perspectiveTransform(src.reshape(-1, 1, 2), H).reshape(-1, 2) - dst, axis=1
+    )
     return H, src, dst, resid, mask.ravel().astype(bool)
 
 
@@ -247,15 +259,25 @@ def analyse(path: str) -> dict | None:
     cols = sorted({c for c, _ in taken})
     rows = sorted({r for _, r in taken})
     return {
-        "path": path, "bgr": bgr, "pts": pts, "taken": taken, "H": H,
-        "resid": resid, "inliers": inliers, "pitch_px": pitch_px,
-        "n_indexed": len(taken), "col_span": len(cols), "row_span": len(rows),
+        "path": path,
+        "bgr": bgr,
+        "pts": pts,
+        "taken": taken,
+        "H": H,
+        "resid": resid,
+        "inliers": inliers,
+        "pitch_px": pitch_px,
+        "n_indexed": len(taken),
+        "col_span": len(cols),
+        "row_span": len(rows),
     }
 
 
 def main(paths: list[str]) -> None:
-    print(f"{'image':>16} {'indexed':>8} {'/630':>6} {'cols':>5} {'rows':>5} "
-          f"{'pitch':>6} {'resid_px':>9} {'resid_pitch':>11}")
+    print(
+        f"{'image':>16} {'indexed':>8} {'/630':>6} {'cols':>5} {'rows':>5} "
+        f"{'pitch':>6} {'resid_px':>9} {'resid_pitch':>11}"
+    )
     tiles = []
     for p in paths:
         r = analyse(p)
@@ -264,30 +286,34 @@ def main(paths: list[str]) -> None:
             continue
         med = float(np.median(r["resid"][r["inliers"]]))
         p95 = float(np.percentile(r["resid"][r["inliers"]], 95))
-        print(f"{p.split('/')[-1]:>16} {r['n_indexed']:8d} "
-              f"{100 * r['n_indexed'] / N_TERMINAL_HOLES:5.1f}% "
-              f"{r['col_span']:5d} {r['row_span']:5d} {r['pitch_px']:6.2f} "
-              f"{med:6.2f}/{p95:.2f} {med / r['pitch_px']:10.3f}")
+        print(
+            f"{p.split('/')[-1]:>16} {r['n_indexed']:8d} "
+            f"{100 * r['n_indexed'] / N_TERMINAL_HOLES:5.1f}% "
+            f"{r['col_span']:5d} {r['row_span']:5d} {r['pitch_px']:6.2f} "
+            f"{med:6.2f}/{p95:.2f} {med / r['pitch_px']:10.3f}"
+        )
 
         # Rectify: map lattice coords to a canonical image at a fixed scale.
         S = 24.0  # pixels per pitch in canonical space
         pad = 3
-        canon = np.array([[S * pad, S * pad, 1],
-                          [0, 0, 0], [0, 0, 0]], dtype=np.float64)
+        canon = np.array([[S * pad, S * pad, 1], [0, 0, 0], [0, 0, 0]], dtype=np.float64)
         T = np.array([[S, 0, S * pad], [0, S, S * pad], [0, 0, 1]])
         Hinv = np.linalg.inv(r["H"])
         warp = T @ Hinv
         out = cv2.warpPerspective(
-            r["bgr"], warp,
-            (int(S * (N_COLS + 2 * pad)), int(S * (12 + 2 * pad))))
+            r["bgr"], warp, (int(S * (N_COLS + 2 * pad)), int(S * (12 + 2 * pad)))
+        )
         tiles.append(out)
         _ = canon
 
     if tiles:
         w = min(t.shape[1] for t in tiles)
         dest = OUT / "rectified.jpg"
-        ok = cv2.imwrite(str(dest), np.vstack([t[:, :w] for t in tiles]),
-                         [cv2.IMWRITE_JPEG_QUALITY, 92])
+        ok = cv2.imwrite(
+            str(dest),
+            np.vstack([t[:, :w] for t in tiles]),
+            [cv2.IMWRITE_JPEG_QUALITY, 92],
+        )
         print(f"\n{'wrote' if ok else 'FAILED to write'} {dest}")
 
 

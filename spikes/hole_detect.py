@@ -29,8 +29,12 @@ def detect_holes(bgr: np.ndarray) -> tuple[np.ndarray, float]:
     # them. Block size must be a few hole pitches wide so the local mean is
     # dominated by plastic rather than by the hole itself.
     dark = cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV,
-        blockSize=31, C=8,
+        gray,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        blockSize=31,
+        C=8,
     )
     dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
 
@@ -78,8 +82,10 @@ def main(paths: list[str]) -> None:
 
         pts, pitch = detect_holes(bgr)
         expected = 830
-        print(f"{p.split('/')[-1]:>16}  holes={len(pts):4d} "
-              f"({100 * len(pts) / expected:5.1f}% of 830)  pitch={pitch:5.1f}px")
+        print(
+            f"{p.split('/')[-1]:>16}  holes={len(pts):4d} "
+            f"({100 * len(pts) / expected:5.1f}% of 830)  pitch={pitch:5.1f}px"
+        )
 
         vis = bgr.copy()
         for cx, cy in pts:
@@ -89,9 +95,12 @@ def main(paths: list[str]) -> None:
     if tiles:
         h = min(t.shape[0] for t in tiles)
         tiles = [t[:h] for t in tiles]
-        rows = [np.hstack(tiles[i:i + 2]) for i in range(0, len(tiles) - 1, 2)]
-        cv2.imwrite("data/cache/holes_overlay.jpg", np.vstack(rows),
-                    [cv2.IMWRITE_JPEG_QUALITY, 90])
+        rows = [np.hstack(tiles[i : i + 2]) for i in range(0, len(tiles) - 1, 2)]
+        cv2.imwrite(
+            "data/cache/holes_overlay.jpg",
+            np.vstack(rows),
+            [cv2.IMWRITE_JPEG_QUALITY, 90],
+        )
         print("\nwrote data/cache/holes_overlay.jpg")
 
 

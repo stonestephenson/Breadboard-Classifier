@@ -74,7 +74,8 @@ class Pin:
             raise NetlistError(str(e)) from e
         if not 0.0 <= self.confidence <= 1.0:
             raise NetlistError(
-                f"confidence must be between 0 and 1, got {self.confidence}")
+                f"confidence must be between 0 and 1, got {self.confidence}"
+            )
 
     @property
     def node(self) -> str:
@@ -105,9 +106,11 @@ class Pin:
     def from_json(cls, d: Any) -> Pin:
         if isinstance(d, str):  # bare hole string is a valid shorthand
             return cls(d)
-        return cls(hole=d["hole"],
-                   confidence=d.get("confidence", 1.0),
-                   alternatives=tuple(d.get("alternatives", ())))
+        return cls(
+            hole=d["hole"],
+            confidence=d.get("confidence", 1.0),
+            alternatives=tuple(d.get("alternatives", ())),
+        )
 
 
 @dataclass
@@ -124,21 +127,21 @@ class Component:
         if self.type not in COMPONENT_TYPES:
             raise NetlistError(
                 f"unknown component type {self.type!r}; "
-                f"expected one of {sorted(COMPONENT_TYPES)}")
+                f"expected one of {sorted(COMPONENT_TYPES)}"
+            )
         if self.origin not in ORIGINS:
-            raise NetlistError(
-                f"origin must be one of {ORIGINS}, got {self.origin!r}")
+            raise NetlistError(f"origin must be one of {ORIGINS}, got {self.origin!r}")
 
         allowed, _ = COMPONENT_TYPES[self.type]
         unknown = set(self.pins) - set(allowed)
         if unknown:
             raise NetlistError(
                 f"{self.type} {self.id!r} has unexpected pins {sorted(unknown)}; "
-                f"expected {list(allowed)}")
+                f"expected {list(allowed)}"
+            )
         if self.type != "mcu" and set(self.pins) != set(allowed):
             missing = sorted(set(allowed) - set(self.pins))
-            raise NetlistError(
-                f"{self.type} {self.id!r} is missing pins {missing}")
+            raise NetlistError(f"{self.type} {self.id!r} is missing pins {missing}")
 
     @property
     def polarised(self) -> bool:
@@ -160,8 +163,11 @@ class Component:
         return self.pins[names[0]], self.pins[names[1]]
 
     def to_json(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"id": self.id, "type": self.type,
-                             "pins": {k: v.to_json() for k, v in self.pins.items()}}
+        d: dict[str, Any] = {
+            "id": self.id,
+            "type": self.type,
+            "pins": {k: v.to_json() for k, v in self.pins.items()},
+        }
         if self.attrs:
             d["attrs"] = dict(sorted(self.attrs.items()))
         if self.origin != "student":
@@ -170,10 +176,13 @@ class Component:
 
     @classmethod
     def from_json(cls, d: dict[str, Any]) -> Component:
-        return cls(id=d["id"], type=d["type"],
-                   pins={k: Pin.from_json(v) for k, v in d["pins"].items()},
-                   attrs=d.get("attrs", {}),
-                   origin=d.get("origin", "student"))
+        return cls(
+            id=d["id"],
+            type=d["type"],
+            pins={k: Pin.from_json(v) for k, v in d["pins"].items()},
+            attrs=d.get("attrs", {}),
+            origin=d.get("origin", "student"),
+        )
 
 
 @dataclass
@@ -214,14 +223,21 @@ class Netlist:
 
     def to_json(self) -> str:
         return json.dumps(
-            {"board": self.board, "name": self.name,
-             "components": [c.to_json() for c in self.components]},
-            indent=2, sort_keys=False)
+            {
+                "board": self.board,
+                "name": self.name,
+                "components": [c.to_json() for c in self.components],
+            },
+            indent=2,
+            sort_keys=False,
+        )
 
     @classmethod
     def from_json(cls, d: Any) -> Netlist:
         if isinstance(d, str):
             d = json.loads(d)
-        return cls(board=d.get("board", BOARD),
-                   name=d.get("name", ""),
-                   components=[Component.from_json(c) for c in d["components"]])
+        return cls(
+            board=d.get("board", BOARD),
+            name=d.get("name", ""),
+            components=[Component.from_json(c) for c in d["components"]],
+        )
