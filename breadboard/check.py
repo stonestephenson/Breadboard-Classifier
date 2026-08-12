@@ -305,6 +305,10 @@ def _diff(student: Netlist, reference: Netlist) -> list[Finding]:
     if polarity is not None:
         return [polarity]
 
+    swap = _pin_swap_repair(student, reference)
+    if swap is not None:
+        return [swap]
+
     return [
         Finding(
             kind="circuit_differs",
@@ -325,9 +329,13 @@ def _signature(c: Component) -> tuple:
 
 
 def _inventory_diff(student: Netlist, reference: Netlist) -> list[Finding]:
-    """Parts present in one circuit and not the other, ignoring where they are."""
-    s = [c for c in student if c.is_two_terminal]
-    r = [c for c in reference if c.is_two_terminal]
+    """Parts present in one circuit and not the other, ignoring where they are.
+
+    Covers sensors as well as two-terminal parts; only the Metro Mini is exempt,
+    since it is the fixed anchor rather than something a student adds.
+    """
+    s = [c for c in student if c.type != "mcu"]
+    r = [c for c in reference if c.type != "mcu"]
     pool = list(r)
     extra = []
     for c in s:
@@ -455,6 +463,49 @@ def _polarity_repair(student: Netlist, reference: Netlist) -> Finding | None:
     return None
 
 
+# How the worksheets name a sensor's legs. Students have seen these on the data
+# sheet; they have never seen "vcc".
+PIN_LABELS = {"vcc": "+", "gnd": "-", "out": "OUT", "trig": "trigger", "echo": "echo"}
+
+
+def _pin_swap_repair(student: Netlist, reference: Netlist) -> Finding | None:
+    """Two legs of a multi-terminal part exchanged.
+
+    Needs its own rule because swapping takes *two* moves, so the single-move
+    search can never find it. It is also the error that matters most on a
+    sensor: reversing + and - can destroy the part rather than merely stop it
+    working.
+    """
+    for comp in student:
+        if comp.type == "mcu" or comp.is_two_terminal:
+            continue
+        names = sorted(comp.pins)
+        for i, a in enumerate(names):
+            for b in names[i + 1 :]:
+                trial = deepcopy(student)
+                pins = trial[comp.id].pins
+                pins[a], pins[b] = pins[b], pins[a]
+                if not equivalent(trial, reference):
+                    continue
+                la, lb = PIN_LABELS.get(a, a), PIN_LABELS.get(b, b)
+                return Finding(
+                    kind="reversed_polarity",
+                    message=(
+                        f"The {la} and {lb} legs of {_describe(comp)} are "
+                        f"swapped, so it is wired the wrong way round."
+                    ),
+                    components=(comp.id,),
+                    holes=(comp.pins[a].hole, comp.pins[b].hole),
+                    scope=_scope(comp),
+                    suggestion=(
+                        f"Swap those two wires: the {la} leg should go where "
+                        f"the {lb} leg is now, and the other way round."
+                    ),
+                    detail={"swapped": [a, b]},
+                )
+    return None
+
+
 def _candidate_holes(student: Netlist, reference: Netlist) -> list[str]:
     """Holes worth trying as a repair target.
 
@@ -496,7 +547,15 @@ def _describe(c: Component) -> str:
         ohms = c.attrs.get("ohms")
         return f"the {ohms} ohm resistor" if ohms else "the resistor"
     if c.type == "wire":
-        return "the wire"
+        # Colour cannot be trusted to infer a wire's *role* -- the curriculum
+        # team confirmed students do not follow the conventions, which is why
+        # graph.py ignores it for equivalence. But it is still the best way to
+        # point at which physical wire to move when three of them are in play.
+        colour = c.attrs.get("color")
+        return f"the {colour} wire" if colour else "the wire"
+    if c.type in ("sensor3", "sensor4"):
+        kind = c.attrs.get("kind")
+        return f"the {kind} sensor" if kind else "the sensor"
     return f"the {c.type}"
 
 

@@ -98,10 +98,34 @@ class Edge:
         return False
 
 
+@dataclass(frozen=True)
+class Part:
+    """A component with more than two legs: a sensor, not an LED.
+
+    It is neither an edge (it spans three or four nodes, not two) nor an anchor
+    like the Metro Mini (there could be two of them, and which is which is not
+    given). So it is matched as its own kind of thing: same type, compatible
+    attributes, and pins landing on corresponding nodes.
+
+    Pin identity carries the orientation. VCC must map to where VCC maps, which
+    is what makes swapping a sensor's + and - a detectable error rather than an
+    equivalent rearrangement.
+    """
+
+    id: str
+    type: str
+    attrs: tuple[tuple[str, object], ...]
+    pins: tuple[tuple[str, str], ...]  # (pin name, node), sorted by pin name
+
+    def nodes(self) -> set[str]:
+        return {node for _, node in self.pins}
+
+
 @dataclass
 class CircuitGraph:
     labels: dict[str, frozenset[str]] = field(default_factory=dict)
     edges: list[Edge] = field(default_factory=list)
+    parts: list[Part] = field(default_factory=list)
 
     def label_of(self, node: str) -> frozenset[str]:
         return self.labels.get(node, frozenset())
@@ -110,18 +134,22 @@ class CircuitGraph:
         out = set(self.labels)
         for e in self.edges:
             out.update((e.a, e.b))
+        for p in self.parts:
+            out |= p.nodes()
         return out
 
     def degree(self, node: str) -> int:
         # Self-loops touch the node twice, which correctly keeps a shorted-out
-        # component from looking like a pass-through.
-        return sum((e.a == node) + (e.b == node) for e in self.edges)
+        # component from looking like a pass-through. A leg of a multi-terminal
+        # part counts too, so a sensor pin reads as the junction it is.
+        deg = sum((e.a == node) + (e.b == node) for e in self.edges)
+        return deg + sum(n == node for p in self.parts for _, n in p.pins)
 
     def collapsed(self) -> CircuitGraph:
         """Merge series runs into single edges. See module docstring, step 2."""
         edges = list(self.edges)
         while True:
-            for node in sorted(self.node_set() - set(self._anchored())):
+            for node in sorted(self.node_set() - self._anchored()):
                 touching = [e for e in edges if node in (e.a, e.b)]
                 if len(touching) != 2 or any(e.a == e.b for e in touching):
                     continue
@@ -136,26 +164,47 @@ class CircuitGraph:
                 break
             else:
                 break
-        return CircuitGraph(labels=dict(self.labels), edges=edges)
+        return CircuitGraph(labels=dict(self.labels), edges=edges, parts=list(self.parts))
 
     def _anchored(self) -> set[str]:
-        return {n for n, lab in self.labels.items() if lab}
+        """Nodes that must survive collapsing: MCU pins and sensor legs.
+
+        Both are junctions in the sense that matters -- something identifiable
+        attaches there -- so a series run may not be threaded through them.
+        """
+        anchored = {n for n, lab in self.labels.items() if lab}
+        for p in self.parts:
+            anchored |= p.nodes()
+        return anchored
 
 
 def build(netlist: Netlist) -> CircuitGraph:
-    """Turn a netlist into a graph: MCU pins label nodes, parts become edges."""
+    """Turn a netlist into a graph.
+
+    Three kinds of thing: MCU pins label the nodes they sit on, two-terminal
+    components become edges, and everything with more legs becomes a Part.
+    """
     labels: dict[str, frozenset[str]] = {}
     for comp in netlist.of_type("mcu"):
         for pin_name, pin in comp.pins.items():
             labels[pin.node] = labels.get(pin.node, frozenset()) | {pin_name}
 
-    edges = []
+    edges, parts = [], []
     for comp in netlist:
-        if not comp.is_two_terminal:
-            continue
-        p, q = comp.ordered_pins()
-        edges.append(Edge(p.node, q.node, (_item(comp),)))
-    return CircuitGraph(labels=labels, edges=edges)
+        if comp.is_two_terminal:
+            p, q = comp.ordered_pins()
+            edges.append(Edge(p.node, q.node, (_item(comp),)))
+        elif comp.type != "mcu":
+            keys = SIGNIFICANT_ATTRS.get(comp.type, ())
+            parts.append(
+                Part(
+                    id=comp.id,
+                    type=comp.type,
+                    attrs=tuple((k, comp.attrs[k]) for k in keys if k in comp.attrs),
+                    pins=tuple(sorted((n, p.node) for n, p in comp.pins.items())),
+                )
+            )
+    return CircuitGraph(labels=labels, edges=edges, parts=parts)
 
 
 def _item(comp: Component) -> Item:
@@ -174,7 +223,12 @@ def find_isomorphism(
     ample and far easier to reason about than a canonical-labelling scheme.
     """
     s_nodes, r_nodes = student.node_set(), reference.node_set()
-    if len(s_nodes) != len(r_nodes) or len(student.edges) != len(reference.edges):
+    if (
+        len(s_nodes) != len(r_nodes)
+        or len(student.edges) != len(reference.edges)
+        or sorted(p.type for p in student.parts)
+        != sorted(p.type for p in reference.parts)
+    ):
         return None
 
     mapping: dict[str, str] = {}
@@ -204,7 +258,10 @@ def _search(
     candidates: list[str],
 ) -> dict[str, str] | None:
     if not free:
-        return dict(mapping) if _edges_agree(student, reference, mapping) else None
+        ok = _edges_agree(student, reference, mapping) and _parts_agree(
+            student, reference, mapping
+        )
+        return dict(mapping) if ok else None
 
     node, rest = free[0], free[1:]
     for cand in candidates:
@@ -248,6 +305,36 @@ def _edges_agree(
         return False
     pool = list(reference.edges)
     return all(_consume(e, pool) for e in mapped) and not pool
+
+
+def _parts_agree(
+    student: CircuitGraph, reference: CircuitGraph, mapping: dict[str, str]
+) -> bool:
+    """Every multi-terminal part must have a counterpart on the same nodes.
+
+    Which sensor is "the" sensor is not given, so this is a small matching
+    problem rather than a lookup -- but a lab has one or two parts at most, so
+    consuming from a pool is enough and needs no cleverness.
+
+    Pin names must correspond exactly: VCC to VCC. That is what makes a swapped
+    + and - fail rather than pass as a rearrangement.
+    """
+    pool = list(reference.parts)
+    for sp in student.parts:
+        want = {name: mapping.get(node) for name, node in sp.pins}
+        if None in want.values():
+            return False
+        for i, rp in enumerate(pool):
+            if rp.type != sp.type or dict(rp.pins) != want:
+                continue
+            mine = dict(sp.attrs)
+            # As elsewhere: an attribute the reference omits is a wildcard.
+            if all(mine.get(k, v) == v for k, v in rp.attrs):
+                pool.pop(i)
+                break
+        else:
+            return False
+    return not pool
 
 
 def _partial_ok(

@@ -6,3 +6,14 @@ __pycache__/
 data/cache/
 out/
 *.egg-info/
+
+# Third-party material that must never enter this repo's history.
+# - Curriculum PDFs from Hannah: an active study is running on these activities;
+#   she asked that they not be shared or put on any public-facing service.
+# - LbyM web app source from Jeffery: their code, shared for reference only
+#   because Troy did not want to add outside accounts to their GitLab.
+# Keep both out of git, out of any published artifact, and local to this machine.
+coursecurriculum.zip
+curriculum/
+lbym-web-app-master*.zip
+lbym-web-app-master*/

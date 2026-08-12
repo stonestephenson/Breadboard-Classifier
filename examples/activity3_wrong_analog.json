@@ -1,0 +1,91 @@
+{
+  "board": "WB-102",
+  "name": "activity3 (signal wire on A1)",
+  "components": [
+    {
+      "id": "MCU",
+      "type": "mcu",
+      "pins": {
+        "3V": {
+          "hole": "f31"
+        },
+        "5V": {
+          "hole": "f32"
+        },
+        "GND": {
+          "hole": "f33"
+        },
+        "A0": {
+          "hole": "f35"
+        },
+        "A1": {
+          "hole": "f36"
+        }
+      },
+      "origin": "factory"
+    },
+    {
+      "id": "LIGHT",
+      "type": "sensor3",
+      "pins": {
+        "vcc": {
+          "hole": "a10"
+        },
+        "out": {
+          "hole": "a12"
+        },
+        "gnd": {
+          "hole": "a14"
+        }
+      },
+      "attrs": {
+        "kind": "light"
+      }
+    },
+    {
+      "id": "W_power",
+      "type": "wire",
+      "pins": {
+        "1": {
+          "hole": "j31"
+        },
+        "2": {
+          "hole": "a10"
+        }
+      },
+      "attrs": {
+        "color": "red"
+      }
+    },
+    {
+      "id": "W_signal",
+      "type": "wire",
+      "pins": {
+        "1": {
+          "hole": "j36"
+        },
+        "2": {
+          "hole": "a12"
+        }
+      },
+      "attrs": {
+        "color": "yellow"
+      }
+    },
+    {
+      "id": "W_ground",
+      "type": "wire",
+      "pins": {
+        "1": {
+          "hole": "j33"
+        },
+        "2": {
+          "hole": "a14"
+        }
+      },
+      "attrs": {
+        "color": "black"
+      }
+    }
+  ]
+}
