@@ -8,12 +8,19 @@ out/
 *.egg-info/
 
 # Third-party material that must never enter this repo's history.
+# This repo is public, so anything listed here would be world-readable if committed.
 # - Curriculum PDFs from Hannah: an active study is running on these activities;
 #   she asked that they not be shared or put on any public-facing service.
-# - LbyM web app source from Jeffery: their code, shared for reference only
-#   because Troy did not want to add outside accounts to their GitLab.
-# Keep both out of git, out of any published artifact, and local to this machine.
+# - LbyM source from Jeffery (web app and the Arduino driver): their code, shared
+#   for reference only because Troy did not want to add outside accounts to their
+#   GitLab.
+# - The STEMACES kit contents list: program material, not ours to publish.
+# Keep all of it out of git, out of any published artifact, and local to this
+# machine. Docs may cite these paths; they are local-only by design.
 coursecurriculum.zip
 curriculum/
+PDFs for Stone/
 lbym-web-app-master*.zip
 lbym-web-app-master*/
+lbymDriver*/
+STEMACES-Kit-Contents-List.docx

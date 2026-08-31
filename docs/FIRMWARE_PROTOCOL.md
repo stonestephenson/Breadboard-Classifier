@@ -1,6 +1,7 @@
 # LbyM firmware protocol — what it gives us
 
-**Source:** `lbymDriver2024-HC-SR04-ALT/` (received 2026-08-06, built with Arduino IDE 1.8.19).
+**Source:** the LbyM driver sketch `lbymDriver2024-HC-SR04-ALT/` (received 2026-08-06, built
+with Arduino IDE 1.8.19). LbyM's own code — held locally, deliberately not committed here.
 **Target:** Adafruit Metro Mini V2 = ATmega328P @ 16 MHz. Serial at 115200 baud.
 **Analysed:** 2026-08-06.
 

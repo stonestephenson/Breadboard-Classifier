@@ -3,8 +3,8 @@
 Sent to the SSU curriculum / engineering team on 2026-08-06. Update this file with answers as
 they arrive, and note what each answer unblocks or changes.
 
-Routing: Q1 → the programmer who wrote the LbyM technical brief. Q5 → Hannah
-(Hellmanh@sonoma.edu), named as the kit contact in `STEMACES-Kit-Contents-List.docx`. Q2–Q4 →
+Routing: Q1 → the programmer who wrote the LbyM technical brief. Q5 → Hannah, named as
+the kit contact in the STEMACES kit contents list (held locally, not in this repo). Q2–Q4 →
 curriculum side.
 
 ---
@@ -183,8 +183,7 @@ rejected in DECISIONS.md R2/R3.
 **~7 labs** will use photo troubleshooting. Small and tractable: authoring 7 reference circuits
 is a bounded content task, not an open-ended one.
 
-**Curriculum available from Hannah** (hellmanh@sonoma.edu) — same contact as the kit, so one
-email covers both.
+**Curriculum available from Hannah** — same contact as the kit, so one email covers both.
 
 Still to read from the actual labs: complexity range, how much the instructions constrain
 structure, and how many genuinely different arrangements are correct per lab.
@@ -212,8 +211,8 @@ real examples.
 
 ## Q5 — Obtaining a kit  ✅ ANSWERED (2026-08-06)
 
-Contact **Hannah Helman, hellmanh@sonoma.edu**. Action item, not a question. Request the kit and
-the curriculum for the ~7 labs in the same message.
+Contact **Hannah** (address in the kit contents list). Action item, not a question. Request
+the kit and the curriculum for the ~7 labs in the same message.
 
 ---
 
@@ -258,8 +257,9 @@ question, not an architecture question.
 - Hardware kit **is** standardized: one board model, one microcontroller. ✅
 
 ### Parts list — ANSWERED
-`STEMACES-Kit-Contents-List.docx`, summarised in ARCHITECTURE.md §5. Headline: 330 Ω is the
-only resistor value, so no colour-band decoding is needed.
+The STEMACES kit contents list (held locally, not in this repo), summarised in
+ARCHITECTURE.md §5. Headline: 330 Ω is the only resistor value, so no colour-band
+decoding is needed.
 
 ### Capture UX — ANSWERED (project side)
 Guided check-deposit-style capture approved; students can see the screen while aiming. Video
