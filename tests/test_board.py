@@ -139,3 +139,23 @@ class TestGeometry:
 
     def test_positions_are_distinct_for_every_hole(self):
         assert len({hole_position(h) for h in ALL_HOLES}) == len(ALL_HOLES)
+
+    def test_rail_hole_1_sits_over_column_3(self):
+        # The rails are shorter than the terminal strip and centred on it.
+        for rail in RAILS:
+            assert hole_position(f"{rail}:1")[0] == pytest.approx(hole_position("a3")[0])
+
+    def test_rails_sit_symmetrically_about_the_terminal_strip(self):
+        # The board is 180-degree symmetric, so the gap from row a to the nearest
+        # rail row matches the gap from row j to its nearest rail row.
+        _, y_a = hole_position("a10")
+        _, y_j = hole_position("j10")
+        _, y_top_inner = hole_position("p1-:10")
+        _, y_bottom_inner = hole_position("p2+:10")
+        assert y_a - y_top_inner == pytest.approx(y_bottom_inner - y_j)
+
+    def test_positive_rail_is_outermost_on_the_a_side_and_innermost_on_the_j_side(self):
+        # Read off the real board: each red stripe sits on the same side of its
+        # blue one, so the order flips between the two edges.
+        assert hole_position("p1+:1")[1] < hole_position("p1-:1")[1]
+        assert hole_position("p2+:1")[1] < hole_position("p2-:1")[1]

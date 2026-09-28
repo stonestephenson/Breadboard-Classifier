@@ -16,24 +16,28 @@ Chrome on school-issued machines).
 
 ## Status
 
-**Reasoning half built and tested; perception half in progress.**
+**Reasoning half built and tested; rectification works on real photos; closing the loop.**
 
 | Piece | State |
 |-------|-------|
-| Circuit model + checker (`breadboard/`) | **Done.** 109 tests, `docs/CHECKER.md` |
+| Circuit model + checker (`breadboard/`) | **Done**, including 3- and 4-leg sensors. `docs/CHECKER.md` |
 | Electrical probe (`tools/probe.py`) | **Working on real hardware.** `docs/FIRMWARE_PROTOCOL.md` |
-| Rectifier (`spikes/`) | Partly working; basis selection unsolved. `docs/SPIKE_RECTIFY.md` |
-| Per-node occupancy from photos | Not started; needs training data |
-| Lab reference circuits | Blocked on curriculum PDFs |
+| Rectifier (`breadboard/rectify.py`) | **Working on real photos.** Hartley Blakey's normalizer, vendored. `docs/SPIKE_RECTIFY.md` |
+| Per-node occupancy from photos | Not started; a trained model needs data |
+| Lab reference circuits | BasicBoard and Activity 3 done; others need the curriculum |
 
-Run everything: `./venv/bin/python -m pytest tests/ -q`
+Gate: `./.claude/verify.sh` (lint, format, types, tests). Tests alone: `./venv/bin/python -m pytest tests/ -q`
 
-Next, in order:
+Next, in order. The goal is a closed loop for the BasicBoard lab, where webcam and USB are on
+one laptop, with no trained vision model:
 
-1. **Rectifier: anchor on the rail stripes before fitting the lattice.** Current failure and the
-   intended fix are both written up in `docs/SPIKE_RECTIFY.md`.
-2. **Emit a Netlist from the probe**, so the electrical channel feeds the checker end to end.
-3. **Sensors in the graph** — `sensor3`/`sensor4` parse but are not yet graph vertices.
+1. **Emit structured facts from the probe**, so the electrical channel feeds the checker.
+2. **Blink and watch.** The probe lights each LED pin in turn while the webcam records; where the
+   rectified image brightens is that pin's LED. This finds which pin drives which LED, and where
+   it sits on the board, by observation rather than inference.
+3. **Score layout hypotheses.** Start from the lab's layout, try small variations (the
+   generator's six error types), and keep the one the evidence supports. Abstain on a tie.
+4. **Explain on the photo** (`Rectification.to_photo` inverts the warp), behind a one-button demo.
 
 ## The one principle
 
@@ -100,14 +104,23 @@ full text and what each unblocks.
 | 5 | How do we obtain a complete student kit? | Component crop library, all hardware questions |
 | 6 | *(deferred)* Student-invented circuits in scope? | Scope only — does not change what we build first |
 
-## Related repo
+## Related repos
+
+`github.com/hartleyblakey/breadboard-normalizer` — Hartley Blakey's rectifier (a CS470
+project on this same problem). **This is our rectifier**, vendored in `breadboard/_vendor/` with
+a few small changes. Read its `__init__.py` docstring before editing it. Keep upstream's style
+(it is excluded from ruff and pyright), and record any change there. A license file is pending
+upstream.
 
 `../breadboard_generator` — the previous attempt. **Its renderer is retired** (see
 `docs/DECISIONS.md`), but three things carry forward and should be reused rather than rewritten:
 
-- `generator/grid.py` — the (row, col) → pixel coordinate system and board geometry. This
-  becomes our canonical rectified space.
-- `config/board_spec.json` — WB-102 physical dimensions, single source of truth.
+- `generator/grid.py` — the (row, col) → pixel coordinate system and board geometry. Canonical
+  space is now the rectifier's 1024 × 340 frame instead (`breadboard/rectify.py`), and
+  `board.hole_position` is tested to agree with it.
+- `config/board_spec.json` — WB-102 physical dimensions. Its rail offset (4.0 mm) does not
+  match the real board. The rectifier's template, fitted to real photos, gives 7.2 mm (see
+  `RAIL_OFFSET_MM` in `breadboard/board.py`).
 - `generator/mutations.py` — the six error types. This is the seed of our error taxonomy and a
   free test-case generator for the checker.
 

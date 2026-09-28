@@ -3,7 +3,7 @@
   "venv": "venv",
   "extraPaths": ["."],
   "include": ["breadboard", "tests", "spikes", "tools"],
-  "exclude": ["venv", "data", "**/__pycache__"],
+  "exclude": ["venv", "data", "**/__pycache__", "breadboard/_vendor"],
   "reportMissingImports": "error",
   "reportMissingModuleSource": "none"
 }

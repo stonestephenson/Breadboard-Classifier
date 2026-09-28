@@ -9,6 +9,61 @@ component leads in the right electrical node? This is the go/no-go for the archi
 covering empty boards through full Metro Mini builds, three background surfaces, varied
 lighting and mild perspective.
 
+## Update 2026-09-27: superseded by Hartley Blakey's normalizer
+
+Hartley Blakey, on the team, had already solved this problem in a separate repo
+(github.com/hartleyblakey/breadboard-normalizer). This spike did not know about it. It is now
+our rectifier, vendored in `breadboard/_vendor/breadboard_normalizer/` and wrapped by
+`breadboard/rectify.py`. Try it: `./venv/bin/python -m breadboard rectify PHOTO -o out/`.
+
+**Why it works where this spike did not:** it goes coarse to fine instead of finding the grid
+from nothing.
+
+1. A pretrained document-corner model (DocAligner, used off the shelf) finds the board's four
+   corners. That alone fixes scale and position, and it removes the half-pitch and diagonal
+   grids this spike kept choosing.
+2. Pinholes detected in the rough warp are snapped onto a hole template with ICP and RANSAC.
+   An explicit off-by-one column search then corrects the corner model's error.
+3. The red and blue rail stripes decide which end is column 1: the anchoring step proposed
+   below.
+
+| | this spike | Hartley's normalizer |
+|---|---|---|
+| 12 sample photos | 8 fitted, some on the wrong grid or upside down | **12**, all the right way round |
+| BasicBoard desk photo | failed (20 columns for 63) | **fitted** |
+| Time per photo | seconds | ~0.2 s |
+
+Judged by eye, because a low residual does not prove the grid is right (see below). The printed
+column numbers line up with the fitted grid on every photo, with column 1 at the same end. The
+BasicBoard photo's four corner holes are pinned in `tests/test_rectify.py` at positions checked
+against the printed letters and numbers.
+
+**Found along the way:** `board.hole_position` had the power rails in the wrong place. They
+started over column 1 instead of column 3, and the top rail sat 1.8 pitches too close to row a.
+The template's terminal holes agree with our geometry to 0.02 pitch, which vouches for its rail
+positions too. The fix is tested to keep the two in agreement. The generator's
+`board_spec.json` gives the rail offset as 4.0 mm; the template gives 7.2 mm.
+
+**Two checks added on top of the normaliser's own grade.** A cold review found that the grade
+alone does not guarantee a usable fit:
+
+- **Orientation.** When the rail stripes cannot be read, the normaliser assumes the board is
+  the right way round. Greyscale copies of all 13 photos still graded perfect, and 7 of them
+  came out upside down. `Rectification.oriented` now re-reads the stripes on the final view.
+- **Column registration.** The hole grid repeats, so a fit shifted by one column still lands
+  most holes on template holes, and still grades perfect. Only the rails' gaps and the grid's
+  ends give it away. `Rectification.column_margin` compares the fit against the same fit
+  shifted by one or two columns. On the 13 photos the true fit won by 0.038–0.062 of detected
+  holes. `ok` requires at least 0.02.
+
+`Rectification.ok` requires all three. When it is False, the result must not be read.
+
+**Not yet tested:** live webcam frames (upstream's README shows a webcam demo working), and the
+full 248-photo set. `spikes/lattice_fit.py` stays as a record of this spike; nothing depends
+on it.
+
+The rest of this document is the original spike, unchanged.
+
 ## Verdict
 
 **Promising — proceed, with known unfinished work.** Geometry is not the problem: where the fit

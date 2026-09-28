@@ -125,6 +125,9 @@ can move. The GPUs remain the training hardware regardless.
 | Decision | Rationale |
 |----------|-----------|
 | Rectify real photos into canonical grid space | Deterministic, self-checking, invertible. See ARCHITECTURE.md §3[2]. |
+| Rectify coarse to fine, with Hartley Blakey's normalizer | A pretrained corner model gives the rough outline; hole snapping gives the accuracy. It fitted 13/13 photos where our fit-the-grid-from-nothing spike fitted 8/12 and could not tell which end was column 1. `docs/SPIKE_RECTIFY.md` |
+| A rectification is usable only if orientation and column are confirmed | The normaliser's own grade passes upside-down boards when the stripes are unreadable, and fits one column off. Either would put every lead in the wrong named hole with full confidence. `docs/SPIKE_RECTIFY.md` |
+| Run the corner model on onnxruntime, not DocAligner's package | DocAligner's support library pins an onnxruntime that does not exist for Python 3.14. The same ONNX file is what an in-browser build would run. Identical corners on 13 photos. |
 | Perceive only in rectified space | Perspective, scale and rotation are already removed — a far smaller problem. |
 | Verification over discovery | The target circuit is known; it constrains ambiguous pixels. Free-design is deferred (open question 6). |
 | Deterministic checker, templated explanations | Exactness where exactness is required; no hallucinated fixes. |

@@ -147,15 +147,21 @@ Three properties matter:
 - **Invertible.** A homography inverts, so anything found in canonical space can be drawn back
   onto the student's own photo. We circle the mistake in their picture.
 
-**PARTIALLY VALIDATED (2026-08-06)** — see `docs/SPIKE_RECTIFY.md`. On a 12-photo sample of the
-real data, 8 fitted successfully with median reprojection residual of **0.02–0.06 pitch**. We
-need half-pitch accuracy to assign a lead to the right column, so the margin is roughly an order
-of magnitude. Geometry is not the limiting factor; detection recall and occlusion are.
+**WORKING (2026-09-27)** — `breadboard/rectify.py`, built on Hartley Blakey's normalizer; see
+`docs/SPIKE_RECTIFY.md`. It fitted all 13 test photos the right way round, including a cluttered
+desk shot that defeated our own spike, in about 0.2 s each. It goes coarse to fine. A pretrained
+off-the-shelf corner model gives the rough board outline. Hole detection then snaps onto the
+template, and the rail stripes fix which end is column 1. The corner model is inference, but
+only the rough fit depends on it. The result is usable (`Rectification.ok`) only when three
+checks pass: the holes fit the template, the rail stripes confirm which end is column 1, and the
+fitted column beats the same fit shifted by a column or two. A fit that fails any of them makes
+the caller abstain rather than read holes from it.
 
-Still open: anchoring the lattice to the board spec (a bare grid is ambiguous up to an integer
-origin and a 180° flip), and 4/12 failures on images with heavy background speckle. Neither is
-expected to survive contact with guided multi-frame capture — we need one good frame per clip,
-not one good photo per attempt.
+Still open: live webcam frames, and a success rate over all 248 photos rather than a sample.
+
+*Original spike (2026-08-06), for the record:* our own lattice fit reached 0.02–0.06 pitch
+residual where it locked on, against a half-pitch requirement. But it fitted only 8 of 12 photos,
+and it could not anchor the grid's origin or orientation.
 
 ### [3] Perceive — in canonical space
 
@@ -332,7 +338,7 @@ deliberately deferred, not foreclosed — keep the model boundary clean so it ca
 
 | Risk | Severity | Mitigation |
 |------|----------|-----------|
-| ~~Rectification fails on cluttered real photos~~ | **Downgraded** 2026-08-06 | Spiked: 8/12 fit at 0.02–0.06 pitch residual. See `docs/SPIKE_RECTIFY.md` |
+| ~~Rectification fails on cluttered real photos~~ | **Largely retired** 2026-09-27 | Hartley's normalizer: 13/13 test photos. Live webcam untested. See `docs/SPIKE_RECTIFY.md` |
 | Occlusion hides connections | High | Multi-frame capture, measurement channel, abstention |
 | Wire endpoint association | High | Fixed lengths bound search; colour separates crossings; measurement confirms |
 | LED polarity not visible once seated | Medium | May be electrically detectable; otherwise a UX nudge |

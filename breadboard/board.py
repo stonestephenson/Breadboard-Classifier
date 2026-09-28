@@ -37,6 +37,12 @@ N_COLS = 63
 RAILS = ("p1+", "p1-", "p2+", "p2-")
 RAIL_HOLES = 50
 RAIL_SEGMENT_HOLES = 25  # each rail is two independent runs of this length
+RAIL_START_COL = 3  # rail hole 1 sits over terminal column 3
+# Outermost terminal row (a or j) to the nearest rail row. Measured, not specified:
+# the rectifier's hole template, fitted to real photos, puts it at 2.83 pitches, and
+# its terminal holes agree with this module to 0.02 pitch. The generator's
+# board_spec.json says 4.0 mm, which does not match the real board.
+RAIL_OFFSET_MM = 7.2
 
 _TERMINAL_RE = re.compile(r"^([a-j])([0-9]{1,2})$")
 _RAIL_RE = re.compile(r"^(p[12][+-]):([0-9]{1,2})$")
@@ -144,9 +150,16 @@ def hole_position(hole: str) -> tuple[float, float]:
         return x, y
 
     # Rail holes sit in groups of five with a gap between groups, and the rails
-    # run outside the terminal area on both long edges.
+    # run outside the terminal area on both long edges. Each red (+) stripe sits
+    # on the same side of its blue one, so + is the outer row along row a and the
+    # inner row along row j.
     group, within = divmod(index - 1, 5)
-    x = (group * 6 + within) * PITCH_MM
-    edge_offset = -2 * PITCH_MM if where.startswith("p1") else 14 * PITCH_MM
-    y = edge_offset + (0.0 if where.endswith("+") else PITCH_MM)
+    x = (RAIL_START_COL - 1 + group * 6 + within) * PITCH_MM
+    if where.startswith("p1"):
+        inner = -RAIL_OFFSET_MM
+        y = inner - PITCH_MM if where.endswith("+") else inner
+    else:
+        _, row_j = hole_position(f"{ROWS[-1]}1")
+        inner = row_j + RAIL_OFFSET_MM
+        y = inner if where.endswith("+") else inner + PITCH_MM
     return x, y

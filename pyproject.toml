@@ -4,11 +4,15 @@ version = "0.1.0"
 description = "Diagnose student breadboard circuits from a photo and the board itself"
 requires-python = ">=3.10"
 dependencies = [
-    "numpy",
+    "fastquadtree>=2.4,<3",  # API used by the vendored normalizer
+    "numpy>=2",  # the vendored normalizer uses np.atan2
+    "onnxruntime",
     "opencv-python",
     "pillow",
     "pillow-heif",
     "pyserial",
+    "scikit-image",
+    "scikit-learn",
     "scipy",
 ]
 
@@ -19,8 +23,11 @@ dev = ["pytest", "ruff"]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["breadboard"]
+[tool.setuptools.packages.find]
+include = ["breadboard*"]
+
+[tool.setuptools.package-data]
+"breadboard._vendor.breadboard_normalizer.vendor.icp" = ["LICENSE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -28,7 +35,9 @@ addopts = "-q"
 
 [tool.ruff]
 line-length = 90
-extend-exclude = ["venv", "data"]
+# breadboard/_vendor holds third-party code kept in its upstream style for easy syncing.
+extend-exclude = ["venv", "data", "breadboard/_vendor"]
+force-exclude = true
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PIE", "BLE", "S"]

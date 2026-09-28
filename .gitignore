@@ -24,3 +24,6 @@ lbym-web-app-master*.zip
 lbym-web-app-master*/
 lbymDriver*/
 STEMACES-Kit-Contents-List.docx
+
+# Downloaded model weights (fetched on first use; see breadboard/rectify.py).
+data/models/
