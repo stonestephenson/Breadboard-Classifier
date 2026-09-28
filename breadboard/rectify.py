@@ -6,7 +6,7 @@ rotation before anything tries to recognise a part (ARCHITECTURE.md section 3[2]
 It also works in reverse: anything found in canonical space can be drawn back
 onto the student's own photo.
 
-The fit is Hartley Blakey's breadboard-normalizer, vendored with a few small
+The fit is breadboard-normalizer, vendored with a few small
 changes: optional imports, and a pluggable corner model
 (credits and changes: breadboard/_vendor/breadboard_normalizer/__init__.py). It
 works coarse to fine:

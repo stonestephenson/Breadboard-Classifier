@@ -22,7 +22,7 @@ Chrome on school-issued machines).
 |-------|-------|
 | Circuit model + checker (`breadboard/`) | **Done**, including 3- and 4-leg sensors. `docs/CHECKER.md` |
 | Electrical probe (`tools/probe.py`) | **Working on real hardware.** `docs/FIRMWARE_PROTOCOL.md` |
-| Rectifier (`breadboard/rectify.py`) | **Working on real photos.** Hartley Blakey's normalizer, vendored. `docs/SPIKE_RECTIFY.md` |
+| Rectifier (`breadboard/rectify.py`) | **Working on real photos**, and live on a webcam (`tools/live.py`). Built on the vendored breadboard-normalizer. `docs/SPIKE_RECTIFY.md` |
 | Per-node occupancy from photos | Not started; a trained model needs data |
 | Lab reference circuits | BasicBoard and Activity 3 done; others need the curriculum |
 
@@ -106,11 +106,9 @@ full text and what each unblocks.
 
 ## Related repos
 
-`github.com/hartleyblakey/breadboard-normalizer` — Hartley Blakey's rectifier (a CS470
-project on this same problem). **This is our rectifier**, vendored in `breadboard/_vendor/` with
-a few small changes. Read its `__init__.py` docstring before editing it. Keep upstream's style
-(it is excluded from ruff and pyright), and record any change there. A license file is pending
-upstream.
+`github.com/hartleyblakey/breadboard-normalizer` (MIT) — **our rectifier**, vendored in
+`breadboard/_vendor/` with a few small changes. Read its `__init__.py` docstring before editing
+it. Keep upstream's style (it is excluded from ruff and pyright), and record any change there.
 
 `../breadboard_generator` — the previous attempt. **Its renderer is retired** (see
 `docs/DECISIONS.md`), but three things carry forward and should be reused rather than rewritten:

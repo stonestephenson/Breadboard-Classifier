@@ -9,10 +9,10 @@ component leads in the right electrical node? This is the go/no-go for the archi
 covering empty boards through full Metro Mini builds, three background surfaces, varied
 lighting and mild perspective.
 
-## Update 2026-09-27: superseded by Hartley Blakey's normalizer
+## Update 2026-09-27: superseded by breadboard-normalizer
 
-Hartley Blakey, on the team, had already solved this problem in a separate repo
-(github.com/hartleyblakey/breadboard-normalizer). This spike did not know about it. It is now
+breadboard-normalizer (github.com/hartleyblakey/breadboard-normalizer) had already solved
+this problem. This spike did not know about it. It is now
 our rectifier, vendored in `breadboard/_vendor/breadboard_normalizer/` and wrapped by
 `breadboard/rectify.py`. Try it: `./venv/bin/python -m breadboard rectify PHOTO -o out/`.
 
@@ -27,7 +27,7 @@ from nothing.
 3. The red and blue rail stripes decide which end is column 1: the anchoring step proposed
    below.
 
-| | this spike | Hartley's normalizer |
+| | this spike | breadboard-normalizer |
 |---|---|---|
 | 12 sample photos | 8 fitted, some on the wrong grid or upside down | **12**, all the right way round |
 | BasicBoard desk photo | failed (20 columns for 63) | **fitted** |

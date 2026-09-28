@@ -147,7 +147,7 @@ Three properties matter:
 - **Invertible.** A homography inverts, so anything found in canonical space can be drawn back
   onto the student's own photo. We circle the mistake in their picture.
 
-**WORKING (2026-09-27)** — `breadboard/rectify.py`, built on Hartley Blakey's normalizer; see
+**WORKING (2026-09-27)** — `breadboard/rectify.py`, built on the vendored breadboard-normalizer; see
 `docs/SPIKE_RECTIFY.md`. It fitted all 13 test photos the right way round, including a cluttered
 desk shot that defeated our own spike, in about 0.2 s each. It goes coarse to fine. A pretrained
 off-the-shelf corner model gives the rough board outline. Hole detection then snaps onto the
@@ -338,7 +338,7 @@ deliberately deferred, not foreclosed — keep the model boundary clean so it ca
 
 | Risk | Severity | Mitigation |
 |------|----------|-----------|
-| ~~Rectification fails on cluttered real photos~~ | **Largely retired** 2026-09-27 | Hartley's normalizer: 13/13 test photos. Live webcam untested. See `docs/SPIKE_RECTIFY.md` |
+| ~~Rectification fails on cluttered real photos~~ | **Largely retired** 2026-09-27 | breadboard-normalizer: 13/13 test photos, and works on a live webcam. See `docs/SPIKE_RECTIFY.md` |
 | Occlusion hides connections | High | Multi-frame capture, measurement channel, abstention |
 | Wire endpoint association | High | Fixed lengths bound search; colour separates crossings; measurement confirms |
 | LED polarity not visible once seated | Medium | May be electrically detectable; otherwise a UX nudge |
