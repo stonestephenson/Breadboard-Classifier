@@ -23,6 +23,7 @@ Chrome on school-issued machines).
 | Circuit model + checker (`breadboard/`) | **Done**, including 3- and 4-leg sensors. `docs/CHECKER.md` |
 | Electrical probe (`tools/probe.py`) | **Working on real hardware.** `docs/FIRMWARE_PROTOCOL.md` |
 | Rectifier (`breadboard/rectify.py`) | **Working on real photos**, and live on a webcam (`tools/live.py`). Built on the vendored breadboard-normalizer. `docs/SPIKE_RECTIFY.md` |
+| Blink and watch (`breadboard/blink.py`, `tools/blink.py`) | **Working on the real board.** Each LED found by its pin, colour and column, no trained model. |
 | Per-node occupancy from photos | Not started; a trained model needs data |
 | Lab reference circuits | BasicBoard and Activity 3 done; others need the curriculum |
 
@@ -32,9 +33,8 @@ Next, in order. The goal is a closed loop for the BasicBoard lab, where webcam a
 one laptop, with no trained vision model:
 
 1. **Emit structured facts from the probe**, so the electrical channel feeds the checker.
-2. **Blink and watch.** The probe lights each LED pin in turn while the webcam records; where the
-   rectified image brightens is that pin's LED. This finds which pin drives which LED, and where
-   it sits on the board, by observation rather than inference.
+2. ~~Blink and watch~~ — done: `tools/blink.py --camera N`. It needs the board filling most of
+   the frame and a lit room. Filmed from low across a dim desk, the board was often not found.
 3. **Score layout hypotheses.** Start from the lab's layout, try small variations (the
    generator's six error types), and keep the one the evidence supports. Abstain on a tie.
 4. **Explain on the photo** (`Rectification.to_photo` inverts the warp), behind a one-button demo.

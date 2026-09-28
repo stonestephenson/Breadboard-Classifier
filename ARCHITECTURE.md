@@ -208,7 +208,11 @@ Two capabilities this unlocks beyond plain connectivity:
   to reversed drive reveals orientation — retiring a perception problem §5 flags as known-hard.
 - **Stimulus–response capture.** We already record a video clip; if the Arduino toggles pins
   during it, *whichever LED blinks in the video is the LED on that pin*. Component-to-node
-  association by observation rather than inference.
+  association by observation rather than inference. **Working (2026-09-27)**
+  (`breadboard/blink.py`). On two real runs it found all four BasicBoard LEDs by pin, colour
+  and column, and nothing on the other pins. It locates an LED as the core that newly
+  saturates to white. The glow's total brightness change is useless for this, because the glow
+  floods half the board and the camera's exposure shifts with it.
 
 Remaining dependency is no longer firmware but the **web app**: whether our code may send raw
 serial commands through it.

@@ -98,6 +98,22 @@ class Board:
             raise OSError(f"no reply reading A{ch}")
         return r[0] | (r[1] << 8)
 
+    # --- the sketch's own pin commands ---------------------------------------
+    def digital_write(self, pin: int, high: bool) -> None:
+        """digitalWrite through the sketch's opcodes: 0xE0+pin HIGH, 0xD0+pin LOW.
+
+        Pins 2-12 only. This is the exact path the LbyM web app drives, and
+        setup() leaves D2-D10 as outputs.
+        """
+        if not 2 <= pin <= 12:
+            raise ValueError(f"the sketch only switches pins 2-12, not {pin}")
+        self._cmd(bytes([(0xE0 if high else 0xD0) + pin]))
+
+    def pin_level(self, pin: int) -> int:
+        """The voltage a digital pin reads right now: 1 high, 0 low."""
+        reg, _, _, bit = PINS[f"D{pin}"]
+        return (self.read_mem(reg) >> bit) & 1
+
     # --- register state ------------------------------------------------------
     # Registers are always written whole, from state computed in Python. An
     # earlier version did read-modify-write per pin (~350 round trips for one
@@ -379,9 +395,9 @@ def main() -> int:
             try:
                 for pin in range(2, 13):
                     print(f"  pin {pin:>2} HIGH", flush=True)
-                    b._cmd(bytes([0xE0 + pin]))  # digitalWrite(pin, HIGH)
+                    b.digital_write(pin, True)
                     time.sleep(args.hold)
-                    b._cmd(bytes([0xD0 + pin]))  # digitalWrite(pin, LOW)
+                    b.digital_write(pin, False)
                     time.sleep(0.2)
             finally:
                 b.restore(snap)

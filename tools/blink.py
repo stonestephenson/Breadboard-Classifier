@@ -1,0 +1,236 @@
+"""Blink and watch: light each LED in turn and let the camera find it.
+
+    ./venv/bin/python tools/blink.py --camera 1       # run it on the board
+    ./venv/bin/python tools/blink.py --replay DIR     # re-judge a saved run
+
+Needs the board on USB and a camera that sees the whole board, held still for
+the ~20 s a run takes. The laptop switches the output pins (2-10) on one at a
+time, using the commands the LbyM web app itself sends. The camera photographs
+the board with each pin on and then off, and breadboard/blink.py works out what
+lit.
+
+It prints one line per pin, and writes:
+  data/cache/blink/<time>/   the frames, so the run can be re-judged (--replay)
+  out/blink/<time>.jpg       the photo, each LED circled and labelled
+
+Safety: every pin is left low however the run ends: finishing, an error, Ctrl-C,
+or the terminal closing. A pin the circuit ties straight to ground is switched
+off within milliseconds and reported, not photographed. What this cannot catch
+is in breadboard.blink.run_sequence.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import signal
+import sys
+import threading
+import time
+from pathlib import Path
+
+import cv2
+import numpy as np
+from live import first_frame, open_camera
+from probe import Board, autodetect
+
+from breadboard.blink import OUTPUT_PINS, Session, analyse, run_sequence
+
+SETTLE_S = 0.6  # after switching, let the LED and the camera's exposure settle
+SAMPLES = 6  # frames averaged per photo, to beat sensor noise
+SESSIONS = Path("data/cache/blink")
+
+LABEL_COLOURS = {  # RGB, for drawing
+    "red": (255, 60, 60),
+    "orange": (255, 150, 40),
+    "yellow": (255, 230, 40),
+    "green": (40, 230, 80),
+    "blue": (60, 140, 255),
+    "white": (255, 255, 255),
+}
+
+
+class Grabber(threading.Thread):
+    """Reads the camera continuously so a sample is never a stale buffered frame."""
+
+    def __init__(self, cap: cv2.VideoCapture) -> None:
+        super().__init__(daemon=True)
+        self._cap = cap
+        self._frame: np.ndarray | None = None
+        self._count = 0
+        self.running = True
+
+    def run(self) -> None:
+        while self.running:
+            ok, frame = self._cap.read()
+            if ok and frame is not None:
+                self._frame, self._count = frame, self._count + 1
+            else:
+                time.sleep(0.01)  # a hiccup: do not spin
+
+    def sample(self, n: int = SAMPLES) -> np.ndarray:
+        """The mean of the next n new frames, as RGB."""
+        frames, seen = [], self._count
+        deadline = time.monotonic() + 5.0
+        while len(frames) < n:
+            if time.monotonic() > deadline:
+                raise OSError("the camera stopped sending frames")
+            if self._count != seen and self._frame is not None:
+                seen = self._count
+                frames.append(self._frame.astype(np.float32))
+            time.sleep(0.005)
+        mean = np.mean(frames, axis=0).astype(np.uint8)
+        return cv2.cvtColor(mean, cv2.COLOR_BGR2RGB)
+
+
+def _exit_on_signal(signum: int, _frame: object) -> None:
+    # Closing the terminal (SIGHUP) or `kill` (SIGTERM) would otherwise end the
+    # process without running the finally blocks that switch pins off.
+    raise SystemExit(128 + signum)
+
+
+def record(camera: int, pins: tuple[int, ...]) -> Path:
+    """Run the blink sequence on the real board and save every frame."""
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, _exit_on_signal)
+    cap = open_camera(camera)
+    grabber: Grabber | None = None
+    try:
+        if not cap.isOpened() or first_frame(cap) is None:
+            raise OSError(f"camera {camera} is not sending pictures")
+        grabber = Grabber(cap)
+        grabber.start()
+        port = autodetect()
+        if not port:
+            raise OSError("no board found on USB")
+        board = Board(port)
+        try:
+            snapshot = board.snapshot()
+            try:
+                frames, shorted = run_sequence(board, pins, grabber.sample, SETTLE_S)
+            finally:
+                board.restore(snapshot)
+        finally:
+            board.close()
+    finally:
+        # Stop the reader before releasing the camera: releasing it mid-read
+        # crashes the process on macOS. If the reader is stuck, leave the camera
+        # to the process exit rather than risk that.
+        if grabber is not None:
+            grabber.running = False
+            grabber.join(timeout=2.0)
+        if grabber is None or not grabber.is_alive():
+            cap.release()
+
+    run = SESSIONS / time.strftime("%Y%m%d-%H%M%S")
+    run.mkdir(parents=True, exist_ok=True)
+    for name, frame in frames.items():
+        cv2.imwrite(str(run / f"{name}.png"), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+    meta = {"camera": camera, "pins": list(pins), "shorted": shorted}
+    (run / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    return run
+
+
+def load(run: Path) -> tuple[dict[str, np.ndarray], list[int], list[int]]:
+    meta = json.loads((run / "meta.json").read_text())
+    frames = {}
+    for path in sorted(run.glob("*.png")):
+        image = cv2.imread(str(path))
+        if image is None:
+            raise OSError(f"cannot read {path}")
+        frames[path.stem] = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    return frames, meta["pins"], meta.get("shorted", [])
+
+
+def report(session: Session, pins: list[int]) -> list[str]:
+    if session.rect is None:
+        return ["Could not find the board in any frame. Nothing was judged."]
+    lines, dark = [], []
+    for pin in pins:
+        glow = session.glows.get(pin)
+        if pin in session.shorted:
+            lines.append(f"pin {pin:>2}  did not go high: tied to ground? Switched off.")
+        elif pin in session.moved:
+            lines.append(f"pin {pin:>2}  not judged: the camera moved")
+        elif glow is None:
+            lines.append(f"pin {pin:>2}  not judged: no pictures")
+        elif glow.status == "lit":
+            lines.append(f"pin {pin:>2}  {glow.colour} LED at column {glow.column}")
+        elif glow.status == "unclear":
+            lines.append(f"pin {pin:>2}  unclear: {glow.note}. Check it by eye.")
+        else:
+            dark.append(pin)
+    if dark:
+        lines.append(f"pin{'s' if len(dark) > 1 else ''} {_ranges(dark)}  nothing lit")
+    return lines
+
+
+def _ranges(pins: list[int]) -> str:
+    """[6, 7, 8, 10] -> "6-8, 10"."""
+    runs: list[list[int]] = []
+    for pin in sorted(pins):
+        if runs and pin == runs[-1][-1] + 1:
+            runs[-1].append(pin)
+        else:
+            runs.append([pin])
+    return ", ".join(str(r[0]) if len(r) == 1 else f"{r[0]}-{r[-1]}" for r in runs)
+
+
+def draw(frames: dict[str, np.ndarray], session: Session) -> np.ndarray:
+    """The base photo with each lit LED circled and numbered, and a legend."""
+    out = frames["base"].copy()
+    scale = out.shape[1] / 1920
+    font, legend = cv2.FONT_HERSHEY_SIMPLEX, []
+
+    def text(t: str, org: tuple[int, int], colour: tuple[int, int, int], size: float):
+        for thickness, ink in ((6, (0, 0, 0)), (2, colour)):
+            cv2.putText(
+                out, t, org, font, size * scale, ink, max(1, round(thickness * scale))
+            )
+
+    for glow in sorted(session.glows.values(), key=lambda g: g.pin):
+        if not glow.lit or glow.photo_xy is None:
+            continue
+        x, y = (round(v) for v in glow.photo_xy)
+        colour = LABEL_COLOURS.get(glow.colour or "", (255, 255, 255))
+        radius = round(28 * scale)
+        cv2.circle(out, (x, y), radius, colour, max(2, round(4 * scale)))
+        text(
+            str(glow.pin),
+            (x - round(10 * scale), y - radius - round(8 * scale)),
+            colour,
+            1.0,
+        )
+        legend.append(
+            (f"pin {glow.pin}: {glow.colour} LED, column {glow.column}", colour)
+        )
+    for i, (line, colour) in enumerate(legend):
+        text(line, (round(20 * scale), round((50 + 45 * i) * scale)), colour, 1.1)
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Light each LED in turn; find it on camera.")
+    ap.add_argument("--camera", type=int, default=0, help="camera number (default 0)")
+    ap.add_argument("--replay", type=Path, help="re-judge a saved run instead")
+    ap.add_argument("--out", type=Path, default=Path("out/blink"))
+    args = ap.parse_args()
+
+    try:
+        run = args.replay or record(args.camera, OUTPUT_PINS)
+    except OSError as e:
+        print(f"Could not run: {e}")
+        return 1
+    frames, pins, shorted = load(run)
+    session = analyse(frames, pins, shorted)
+    print("\n".join(report(session, pins)))
+
+    args.out.mkdir(parents=True, exist_ok=True)
+    picture = args.out / f"{run.name}.jpg"
+    cv2.imwrite(str(picture), cv2.cvtColor(draw(frames, session), cv2.COLOR_RGB2BGR))
+    print(f"\nframes   {run}\npicture  {picture}")
+    return 0 if session.rect is not None else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
