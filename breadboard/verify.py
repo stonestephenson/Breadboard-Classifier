@@ -18,9 +18,10 @@ every LED in the lab testable, and each one lit in the right colour from the
 right pin. Nothing may be doubtful on any pin, and the board fit must be top
 grade. An LED this cannot test is reported, never assumed fine.
 
-Known limit. During a run every other output pin is held low, so it acts as a
-ground. An LED whose cathode goes to another pin's strip rather than to GND will
-light here, yet may fail when the student's program drives that other pin high.
+During a run only the pin under test drives; every other pin is disconnected
+(blink.run_sequence). So an LED lights only if its current really reaches ground,
+not because some other pin happened to be held low. If the current reaches ground
+through another LED, both glow, which reads as light in two places.
 """
 
 from __future__ import annotations

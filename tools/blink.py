@@ -6,23 +6,25 @@
 
 Needs the board on USB and a camera that sees the whole board, held still for
 the ~20 s a run takes. The laptop switches the output pins (2-10) on one at a
-time, using the commands the LbyM web app itself sends. The camera photographs
-the board with each pin on and then off, and breadboard/blink.py works out what
-lit.
+time, by writing the pin registers through the shipped sketch's memory commands
+(tools/probe.py Board.drive_only). The camera photographs the board with each
+pin on and then off, and breadboard/blink.py works out what lit.
 
 It prints one line per pin, and writes:
   data/cache/blink/<time>/   the frames, so the run can be re-judged (--replay)
   out/blink/<time>.jpg       the photo, each LED circled and labelled
 
-Safety: every pin is left low however the run ends: finishing, an error, Ctrl-C,
-or the terminal closing. A pin the circuit ties straight to ground is switched
-off within milliseconds and reported, not photographed. What this cannot catch
-is in breadboard.blink.run_sequence.
+Safety: only the pin under test ever drives; every other pin is disconnected. A
+pin the circuit holds at ground is released within two messages and reported,
+not photographed. However the run ends (finishing, an error, Ctrl-C, or the
+terminal closing), the board is handed back as the sketch set it up. What this
+cannot catch is in breadboard.blink.run_sequence.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import signal
 import sys
@@ -108,10 +110,13 @@ def record(camera: int, pins: tuple[int, ...]) -> Path:
             raise OSError("no board found on USB")
         board = Board(port)
         try:
+            board.resync()
             snapshot = board.snapshot()
             try:
                 frames, shorted = run_sequence(board, pins, grabber.sample, SETTLE_S)
             finally:
+                with contextlib.suppress(OSError):
+                    board.resync()  # restore is write-only, so it runs either way
                 board.restore(snapshot)
         finally:
             board.close()

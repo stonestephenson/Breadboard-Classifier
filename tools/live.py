@@ -29,6 +29,7 @@ sharper image, and it is easier to hold above the board than a laptop.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import signal
 import sys
 import threading
@@ -207,12 +208,10 @@ class _Watched:
         self.board = board
         self.pin: int | None = None
 
-    def digital_write(self, pin: int, high: bool) -> None:
-        self.board.digital_write(pin, high)
-        self.pin = pin if high else None
-
-    def pin_level(self, pin: int) -> int:
-        return self.board.pin_level(pin)
+    def drive_only(self, pin: int | None) -> int | None:
+        level = self.board.drive_only(pin)
+        self.pin = pin if level != 0 else None
+        return level
 
 
 def check_now(
@@ -258,10 +257,13 @@ def check_now(
         mean = np.mean(frames, axis=0).astype(np.uint8)
         return cv2.cvtColor(mean, cv2.COLOR_BGR2RGB)
 
+    board.resync()
     snapshot = board.snapshot()
     try:
         frames, shorted = run_sequence(watched, OUTPUT_PINS, capture, SETTLE_S, pump)
     finally:
+        with contextlib.suppress(OSError):
+            board.resync()  # restore is write-only, so it runs either way
         board.restore(snapshot)
     show(cv2.cvtColor(frames["base"], cv2.COLOR_RGB2BGR), "Working it out...")
     session = analyse(frames, OUTPUT_PINS, shorted)

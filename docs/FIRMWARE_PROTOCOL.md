@@ -112,6 +112,19 @@ lights.
 Cheap on the Chromebook path (camera and serial on one device). On the phone path it needs the
 pairing channel to carry timing. See ARCHITECTURE.md §3[1].
 
+**Built (2026-09-27): `tools/blink.py`, via `Board.drive_only` in `tools/probe.py`.** It uses
+memory writes, not the `0xE0+pin` opcodes. The pin under test is set to OUTPUT HIGH and every
+other pin to INPUT with no pull-up. So two pins wired together can never fight, and no pin
+held LOW can act as a ground for someone else's LED. The switch releases the old output first,
+then sets PORT, then DDR, so no pin is ever driven LOW on the way. The new pin is read back
+the instant it drives. If it reads LOW, it is released before anything else is sent. Restoring
+the sketch's state disconnects every pin first, then sets PORT, then DDR. Every command first
+discards any stale reply, and a check starts with a resync (flush plus ping). So an
+interrupted read cannot shift later replies by a byte. All of this is tested against an
+emulated chip in `tests/test_probe_board.py`. Measured on the board: a
+disconnected pin with nothing attached keeps the level it was last driven to, for seconds. So
+pin readings in this state cannot prove a wire between two pins, and nothing claims to.
+
 ## Caveats and reserved pins
 
 | Pin(s) | Why hands off |

@@ -145,22 +145,27 @@ class TestGlowColour:
 
 
 class FakeBoard:
-    """Records what run_sequence does to the pins. `grounded` pins read low."""
+    """Records the order of run_sequence's pin commands. `grounded` pins read low.
 
-    def __init__(self, grounded=()):
-        self.high: set[int] = set()
+    This checks the sequence only. The electrical guarantees of the real
+    drive_only are tested against an emulated chip in test_probe_board.py.
+    """
+
+    def __init__(self, grounded=(), fail_release=False):
+        self.driven: int | None = None
         self.grounded = set(grounded)
-        self.log: list[tuple[int, bool]] = []
+        self.fail_release = fail_release
+        self.log: list[int | None] = []
 
-    def digital_write(self, pin: int, high: bool) -> None:
-        self.log.append((pin, high))
-        if high:
-            self.high.add(pin)
-        else:
-            self.high.discard(pin)
-
-    def pin_level(self, pin: int) -> int:
-        return 0 if pin in self.grounded else int(pin in self.high)
+    def drive_only(self, pin: int | None) -> int | None:
+        self.log.append(pin)
+        if pin is None and self.fail_release:
+            raise OSError("serial fault")
+        if pin in self.grounded:
+            self.driven = None
+            return 0
+        self.driven = pin
+        return None if pin is None else 1
 
 
 def _frame():
@@ -172,24 +177,34 @@ def _no_wait(_seconds):
 
 
 class TestRunSequence:
-    def test_photographs_each_pin_on_and_off_and_leaves_all_low(self):
+    def test_photographs_each_pin_on_and_off_and_ends_with_all_released(self):
         board = FakeBoard()
         frames, shorted = run_sequence(board, [2, 3], _frame, sleep=_no_wait)
         assert set(frames) == {"base", "pin2_on", "pin2_off", "pin3_on", "pin3_off"}
         assert shorted == []
-        assert not board.high
+        assert board.driven is None
+
+    def test_only_one_pin_is_ever_driven_and_always_from_all_released(self):
+        # Driving a pin only ever follows "all released", so two pins are never
+        # driven together, and nothing else is held low to act as ground.
+        board = FakeBoard()
+        run_sequence(board, [2, 3, 4], _frame, sleep=_no_wait)
+        assert board.log[0] is None
+        for before, after in zip(board.log, board.log[1:], strict=False):
+            if after is not None:
+                assert before is None
 
     def test_a_pin_tied_to_ground_is_released_at_once_and_not_photographed(self):
         board = FakeBoard(grounded={3})
         frames, shorted = run_sequence(board, [2, 3, 4], _frame, sleep=_no_wait)
         assert shorted == [3]
         assert "pin3_on" not in frames
-        # The very next command after driving it high is driving it low again.
-        i = board.log.index((3, True))
-        assert board.log[i + 1] == (3, False)
-        assert not board.high
+        # The very next command after driving it is releasing it.
+        i = board.log.index(3)
+        assert board.log[i + 1] is None
+        assert board.driven is None
 
-    def test_every_pin_is_left_low_when_the_camera_fails_mid_run(self):
+    def test_every_pin_is_released_when_the_camera_fails_mid_run(self):
         board = FakeBoard()
         shots = iter([_frame(), _frame()])
 
@@ -201,8 +216,21 @@ class TestRunSequence:
 
         with pytest.raises(OSError, match="camera stopped"):
             run_sequence(board, [2, 3, 4], capture, sleep=_no_wait)
-        assert board.log[-3:] == [(2, False), (3, False), (4, False)]
-        assert not board.high
+        assert board.log[-1] is None
+        assert board.driven is None
+
+    def test_an_interrupt_still_stops_the_run_when_releasing_fails_too(self):
+        # A Ctrl-C mid-run must stop the program, even if the serial link is in
+        # a state where releasing the pins fails as well.
+        board = FakeBoard(fail_release=True)
+        board.fail_release = False
+
+        def capture():
+            board.fail_release = True
+            raise KeyboardInterrupt
+
+        with pytest.raises(KeyboardInterrupt):
+            run_sequence(board, [2, 3], capture, sleep=_no_wait)
 
     def test_refuses_pins_that_are_not_outputs(self):
         board = FakeBoard()

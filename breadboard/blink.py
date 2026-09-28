@@ -198,11 +198,15 @@ def find_glow(pin: int, on: np.ndarray, off: np.ndarray, rect: Rectification) ->
 
 
 class PinDriver(Protocol):
-    """The two things run_sequence needs from a board (tools/probe.py's Board)."""
+    """What run_sequence needs from a board (tools/probe.py's Board)."""
 
-    def digital_write(self, pin: int, high: bool) -> None: ...
+    def drive_only(self, pin: int | None) -> int | None:
+        """Drive this pin high and disconnect every other pin; None: all off.
 
-    def pin_level(self, pin: int) -> int: ...
+        Returns what the pin reads the moment it starts driving (0 means held at
+        ground, and it has already been released), or None for no pin.
+        """
+        ...
 
 
 def run_sequence(
@@ -217,13 +221,21 @@ def run_sequence(
     capture() returns the current RGB frame. Returns the frames, named as
     analyse() expects, and the pins that did not go high when driven.
 
-    Safety. Every pin is driven low before starting and again on the way out,
-    even if something fails part-way. Each pin is read back just after it is
-    driven high. If it reads low, the circuit is holding it at ground, so it is
-    driven low again at once and not photographed. That catches a pin wired
-    straight to ground. It cannot catch an LED with no resistor: the pin still
-    reads high while over-driven, and is held for about a second, much as the
-    student's own program would hold it.
+    Safety. Only one pin ever drives at a time. Every other pin is disconnected
+    (an input with no pull-up), not held low. So a wire between two pins cannot
+    make them fight, and no other pin can act as a ground. An LED whose short leg
+    goes to another pin's strip, instead of to ground, gets no help from that
+    pin. It stays dark, or, if that strip has its own LED to ground, both glow
+    faintly in series, which normally reads as light in two places. It no longer
+    passes here only to fail in the student's program.
+    Every pin is disconnected before starting and again on the way out, even if
+    something fails part-way.
+
+    Each pin is read back the moment it is driven high. If it reads low, the
+    circuit is holding it at ground, so it is released at once and not
+    photographed. That catches a pin wired straight to ground. It cannot catch an
+    LED with no resistor: the pin still reads high while over-driven, and is held
+    for about a second, much as the student's own program would hold it.
     """
     unsafe = [p for p in pins if p not in OUTPUT_PINS]
     if unsafe:
@@ -231,30 +243,29 @@ def run_sequence(
     frames: dict[str, np.ndarray] = {}
     shorted: list[int] = []
     try:
-        for pin in pins:
-            board.digital_write(pin, False)
+        board.drive_only(None)
         sleep(settle_s)
         frames["base"] = capture()
         for pin in pins:
-            board.digital_write(pin, True)
-            if board.pin_level(pin) == 0:
-                board.digital_write(pin, False)
+            if board.drive_only(pin) == 0:
+                board.drive_only(None)
                 shorted.append(pin)
                 continue
             sleep(settle_s)
             frames[f"pin{pin}_on"] = capture()
-            board.digital_write(pin, False)
+            board.drive_only(None)
             sleep(settle_s)
             frames[f"pin{pin}_off"] = capture()
-    finally:
-        failed: list[BaseException] = []
-        for pin in pins:
-            try:
-                board.digital_write(pin, False)
-            except OSError as e:  # a serial fault: keep going, the rest still go low
-                failed.append(e)
-        if failed:
-            raise failed[0]
+    except BaseException as error:
+        # Release everything, but never let a failure here hide why the run
+        # stopped: a Ctrl-C or signal must still stop the program.
+        try:
+            board.drive_only(None)
+        except OSError as cleanup:
+            if hasattr(error, "add_note"):
+                error.add_note(f"releasing the pins also failed: {cleanup}")
+        raise
+    board.drive_only(None)
     return frames, shorted
 
 

@@ -54,9 +54,16 @@ OP_ANALOG = {i: 0xC0 + i for i in range(6)}
 
 
 class Board:
-    def __init__(self, port: str, baud: int = 115200, verbose: bool = False):
+    def __init__(
+        self,
+        port: str,
+        baud: int = 115200,
+        verbose: bool = False,
+        ser: serial.Serial | None = None,
+    ):
         self.verbose = verbose
-        self.ser = serial.Serial(port, baud, timeout=1.0)
+        # `ser` lets tests stand in an emulated board for the real port.
+        self.ser = ser if ser is not None else serial.Serial(port, baud, timeout=1.0)
         # Opening the port toggles DTR, which resets the ATmega. Wait for the
         # sketch's "OK!" banner rather than guessing a delay.
         deadline = time.time() + 5.0
@@ -67,11 +74,29 @@ class Board:
                 break
         self.ser.reset_input_buffer()
         self.banner_seen = b"OK!" in banner
+        self._drive: dict[int, int] | None = None  # direction regs, for drive_only
+        self._keep_portd = 0  # PORTD bits of D0/D1, the serial link
 
     def close(self) -> None:
         self.ser.close()
 
+    def resync(self) -> None:
+        """Discard any late reply and check the board answers.
+
+        An interrupted read (Ctrl-C, a signal) can leave a reply byte queued,
+        which would shift every reply after it by one. Raises OSError if the
+        board does not answer.
+        """
+        time.sleep(0.05)
+        self.ser.reset_input_buffer()
+        if not self.ping():
+            raise OSError("the board is not answering")
+
     def _cmd(self, payload: bytes, want: int = 0) -> bytes:
+        # The sketch only ever speaks when asked, so anything already waiting is
+        # a stale reply to an interrupted command. Dropping it keeps this
+        # command's reply aligned.
+        self.ser.reset_input_buffer()
         self.ser.write(payload)
         self.ser.flush()
         out = self.ser.read(want) if want else b""
@@ -114,6 +139,61 @@ class Board:
         reg, _, _, bit = PINS[f"D{pin}"]
         return (self.read_mem(reg) >> bit) & 1
 
+    def drive_only(self, pin: int | None) -> int | None:
+        """Drive `pin` high and disconnect every other pin: input, no pull-up.
+
+        With only one pin driving, no two pins can fight through a wire between
+        them, and no other pin can act as a ground the way a pin held low
+        would. D0/D1, the USB serial link, are left as they are. None
+        disconnects every pin. Restore a snapshot afterwards to hand the board
+        back to the sketch.
+
+        Returns what `pin` reads the moment it starts driving: 1 high, 0 low,
+        None if no pin. A 0 means the circuit is holding it at ground. The pin
+        is then released straight away, before anything else is sent, so the
+        short lasts two messages.
+
+        No pin is ever driven low on the way. The outputs that are going away
+        are released first, the one currently driven before any other. Then the
+        output levels are set, which on an input only enables its pull-up. Only
+        then does the new pin start driving, already high. Each register is
+        verified afterwards.
+        """
+        if pin is not None and not 2 <= pin <= 13:
+            raise ValueError(f"not a pin drive_only may drive: {pin}")
+        if self._drive is None:
+            self._drive = {r: self.read_mem(r) for r in (DDRB, DDRC, DDRD)}
+            self._keep_portd = self.read_mem(PORTD) & 0x03
+        state = self._drive
+        ddr = {DDRB: 0, DDRC: 0, DDRD: state[DDRD] & 0x03}
+        port = {PORTB: 0, PORTC: 0, PORTD: self._keep_portd}
+        reg = bit = None
+        if pin is not None:
+            _, reg, port_reg, bit = PINS[f"D{pin}"]
+            ddr[reg] |= 1 << bit
+            port[port_reg] |= 1 << bit
+
+        # Release: registers with outputs going away, the fullest first.
+        for r in sorted(ddr, key=lambda r: -bin(state[r] & ~ddr[r]).count("1")):
+            if state[r] & ~ddr[r]:
+                state[r] &= ddr[r]
+                self.write_mem(r, state[r])
+        for r, v in port.items():
+            self.write_mem(r, v)
+        level = None
+        if reg is not None and bit is not None:
+            state[reg] = ddr[reg]
+            self.write_mem(reg, ddr[reg])
+            level = self.pin_level(pin) if pin is not None else None
+            if level == 0:
+                state[reg] &= ~(1 << bit)
+                self.write_mem(reg, state[reg])
+        for r, v in {**state, **port}.items():
+            got = self.read_mem(r)
+            if got != v:
+                raise OSError(f"0x{r:02x} reads 0b{got:08b}, expected 0b{v:08b}")
+        return level
+
     # --- register state ------------------------------------------------------
     # Registers are always written whole, from state computed in Python. An
     # earlier version did read-modify-write per pin (~350 round trips for one
@@ -148,8 +228,20 @@ class Board:
         return {r: self.read_mem(r) for r in (DDRB, PORTB, DDRC, PORTC, DDRD, PORTD)}
 
     def restore(self, snap: dict[int, int]) -> None:
-        for reg, val in snap.items():
-            self.write_mem(reg, val)
+        """Put the pin registers back as a snapshot had them.
+
+        In three steps, so no two outputs ever fight on the way. First every pin
+        is disconnected except D0/D1, then the output levels are set, then the
+        directions. Write-only, so a confused reply stream cannot corrupt it.
+        """
+        self.write_mem(DDRB, 0)
+        self.write_mem(DDRC, 0)
+        self.write_mem(DDRD, snap[DDRD] & 0x03)
+        for reg in (PORTB, PORTC, PORTD):
+            self.write_mem(reg, snap[reg])
+        for reg in (DDRB, DDRC, DDRD):
+            self.write_mem(reg, snap[reg])
+        self._drive = None
 
 
 # Pull-up masks covering exactly the probe pins of each port.

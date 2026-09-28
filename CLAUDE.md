@@ -40,7 +40,11 @@ one laptop, with no trained vision model:
    **not** build a full Netlist for `check.py`, because blinking cannot see legs, resistors or
    wires, and inventing them would break the one principle. It is stage A (does it work?) by
    measurement.
-4. **Stage B: say which leg to move.** For a dark LED, name the exact hole. This needs leg
+4. ~~Safety~~ — done. During a check only the pin under test drives, and every other pin is
+   disconnected. Wired-together pins cannot fight, and no pin can pose as ground. A pin held at
+   ground is released within two messages. Tested against an emulated chip
+   (`tests/test_probe_board.py`).
+5. **Stage B: say which leg to move.** For a dark LED, name the exact hole. This needs leg
    positions, so either the trained model or classical detection of the unlit LED's body.
    `examples/basicboard_rewired.json` is the user's own build; the real curriculum labs come
    later.
