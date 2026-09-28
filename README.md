@@ -53,6 +53,7 @@ The others are worth running to see the behaviours that matter most:
 | `basicboard_uncertain.json` | **The same displacement, but flagged as a doubtful reading — the checker declines to call it an error and asks for a better photo instead** |
 | `basicboard_no_resistor.json` | Caught with **no lab file at all** (`check` without `--lab`) |
 | `basicboard_dead_rail.json` | The unpowered half of a split power rail — invisible on the board |
+| `basicboard_rewired.json` | Not a mistake: the BasicBoard as rewired on 2026-09-27 (pin 2 green, 3 blue, 4 white, 5 red), the lab for the live demo |
 
 **Activity 3 (Intro to Sensors)** is the first lab with real wiring, and its answer is fixed by
 the worksheet: the light sensor's + to 3V, − to GND, OUT to A0, with three jumper wires placed
@@ -101,6 +102,8 @@ Plug a Metro Mini in over USB (a **data** cable, not charge-only):
 # pin  5  red LED at column 15
 # pins 6-10  nothing lit
 ./venv/bin/python tools/blink.py --replay data/cache/blink/<run>   # re-judge a saved run
+./venv/bin/python tools/blink.py --camera 1 --lab examples/basicboard_rewired.json
+# Every LED lights from the right pin, so your wiring works. ...
 ```
 
 It switches pins 2-10 on one at a time and finds each LED as the spot that turns white, inside
@@ -135,6 +138,11 @@ measures that stop it shorting an output driver.
 
 Live, on a webcam: `./venv/bin/python tools/live.py` (`--list` to find cameras; an iPhone via
 Continuity Camera works well). It marks every hole on the moving picture, green when usable.
+
+**The demo:** `tools/live.py --camera 1 --lab examples/basicboard_rewired.json` with the board on
+USB. Press `c`. Each LED blinks in turn on screen, then the answer is drawn on the picture: green
+circles for LEDs on the right pin, red for the wrong pin, and a plain sentence for each problem
+and its fix. Pull an LED leg and press `c` again to see a dark LED reported.
 
 From Python, `rectify(load_photo(path))` gives a `Rectification`. It answers "where is hole j37
 in this photo?" (`to_photo`) and "which hole is under this pixel?" (`hole_at`). Its `ok` is

@@ -3,6 +3,7 @@
     ./venv/bin/python tools/live.py              # the default camera
     ./venv/bin/python tools/live.py --camera 1   # another camera, e.g. an iPhone
     ./venv/bin/python tools/live.py --list       # which camera numbers work
+    ./venv/bin/python tools/live.py --camera 1 --lab examples/basicboard_rewired.json
 
 Point the camera so the whole board is in view. Every hole is drawn where the
 rectifier thinks it is. Green means the fit is usable; orange means it is not,
@@ -10,6 +11,10 @@ with the reason across the top. The top-down view sits underneath.
 
 Keys: q quits, s saves the current frame, its overlay and its top-down view to
 out/live/.
+
+With --lab and the board on USB, c checks the wiring. It blinks each LED in turn
+while you watch (tools/blink.py), then shows what works and what to fix, drawn on
+the picture. Any key returns to the live view; c checks again.
 
 The rectifier takes about 0.2 s a frame, so it runs in a background thread on
 the newest frame while the video keeps playing. If the board moves, the overlay
@@ -24,10 +29,12 @@ sharper image, and it is easier to hold above the board than a laptop.
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
@@ -39,8 +46,14 @@ from breadboard.rectify import (
     rectify,
 )
 
+if TYPE_CHECKING:
+    from probe import Board
+
+    from breadboard.netlist import Netlist
+
 GOOD = (40, 200, 40)
 BAD = (255, 140, 0)
+BUSY = (70, 150, 255)
 VIEW_WIDTH = 1280  # on-screen width of each panel
 # An iPhone via Continuity Camera takes about 5 s to send its first real frame.
 WARMUP_SECONDS = 10.0
@@ -67,10 +80,15 @@ def annotate(frame: np.ndarray, rect: Rectification | None) -> np.ndarray:
     """The camera frame (RGB) with holes marked and the verdict across the top."""
     out = draw_holes(frame, rect, CORNER_HOLES) if rect is not None else frame.copy()
     ok, message = verdict(rect)
+    return banner(out, message, GOOD if ok else BAD)
+
+
+def banner(image: np.ndarray, message: str, colour: tuple[int, int, int]) -> np.ndarray:
+    """The image with a coloured bar across the top carrying a message."""
+    out = image.copy()
     w = out.shape[1]
     scale = w / 1600
-    bar = round(60 * scale)
-    cv2.rectangle(out, (0, 0), (w, bar), GOOD if ok else BAD, -1)
+    cv2.rectangle(out, (0, 0), (w, round(60 * scale)), colour, -1)
     cv2.putText(
         out,
         message,
@@ -182,11 +200,109 @@ def save(frame: np.ndarray, rect: Rectification | None, out: Path) -> None:
     print(f"saved {stem}_*.jpg")
 
 
-def run(index: int, out: Path) -> int:
+class _Watched:
+    """Passes pin commands to the board, remembering which pin is on for display."""
+
+    def __init__(self, board: Board) -> None:
+        self.board = board
+        self.pin: int | None = None
+
+    def digital_write(self, pin: int, high: bool) -> None:
+        self.board.digital_write(pin, high)
+        self.pin = pin if high else None
+
+    def pin_level(self, pin: int) -> int:
+        return self.board.pin_level(pin)
+
+
+def check_now(
+    cap: cv2.VideoCapture, board: Board, lab: Netlist, title: str
+) -> np.ndarray:
+    """Blink and watch through the live window. Returns the verdict picture, RGB."""
+    # Imported here: blink.py imports this module's camera helpers.
+    from blink import SAMPLES, SETTLE_S, draw_verdict, print_verdict
+
+    from breadboard.blink import OUTPUT_PINS, analyse, run_sequence
+    from breadboard.verify import verify
+
+    watched = _Watched(board)
+
+    def show(bgr: np.ndarray, message: str) -> None:
+        rgb = _fit_width(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), VIEW_WIDTH)
+        cv2.imshow(title, cv2.cvtColor(banner(rgb, message, BUSY), cv2.COLOR_RGB2BGR))
+        cv2.waitKey(1)
+
+    def read() -> np.ndarray | None:
+        ok, bgr = cap.read()
+        if not ok or bgr is None:
+            time.sleep(0.01)
+            return None
+        on = f"pin {watched.pin} on" if watched.pin else "all pins off"
+        show(bgr, f"Checking the wiring: {on}")
+        return bgr
+
+    def pump(seconds: float) -> None:
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            read()
+
+    def capture() -> np.ndarray:
+        frames: list[np.ndarray] = []
+        deadline = time.monotonic() + 5.0
+        while len(frames) < SAMPLES:
+            if time.monotonic() > deadline:
+                raise OSError("the camera stopped sending frames")
+            bgr = read()
+            if bgr is not None:
+                frames.append(bgr.astype(np.float32))
+        mean = np.mean(frames, axis=0).astype(np.uint8)
+        return cv2.cvtColor(mean, cv2.COLOR_BGR2RGB)
+
+    snapshot = board.snapshot()
+    try:
+        frames, shorted = run_sequence(watched, OUTPUT_PINS, capture, SETTLE_S, pump)
+    finally:
+        board.restore(snapshot)
+    show(cv2.cvtColor(frames["base"], cv2.COLOR_RGB2BGR), "Working it out...")
+    session = analyse(frames, OUTPUT_PINS, shorted)
+    result = verify(lab, session, OUTPUT_PINS)
+    print_verdict(result)
+    return draw_verdict(frames["base"], session, result)
+
+
+def _connect() -> Board:
+    """Open the board on USB. Raises OSError, with a plain reason, if it cannot."""
+    from probe import Board, autodetect
+
+    port = autodetect()
+    if not port:
+        raise OSError("no board found on USB. Plug it in and press c again")
+    try:
+        return Board(port)
+    except OSError as e:
+        raise OSError(
+            f"{port} is busy or unavailable ({e}). Close anything else using the "
+            "board, such as the LbyM web app, and press c again"
+        ) from e
+
+
+def _exit_on_signal(signum: int, _frame: object) -> None:
+    # Closing the terminal or `kill` would otherwise skip the cleanup that
+    # switches pins off.
+    raise SystemExit(128 + signum)
+
+
+def run(index: int, out: Path, lab: Netlist | None = None) -> int:
     cap = open_camera(index)
     if not cap.isOpened():
         print(f"Could not open camera {index}. {_PERMISSION_HINT}")
         return 1
+    # The board is connected on the first c, not here: opening the port resets
+    # the Arduino, which is pointless if nobody checks.
+    board: Board | None = None
+    if lab is not None:
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(sig, _exit_on_signal)
     print("Loading the corner model (the first run downloads it, 83 MB)...")
     rectify(np.full((480, 640, 3), 255, np.uint8))  # load it before the window opens
     print(f"Waiting for camera {index} (an iPhone takes a few seconds)...")
@@ -195,8 +311,11 @@ def run(index: int, out: Path) -> int:
         return 1
     fitter = Fitter()
     fitter.start()
-    title = "breadboard live - q quits, s saves"
+    title = "breadboard live - q quits, s saves" + (
+        ", c checks the wiring" if lab else ""
+    )
     last_frame = time.monotonic()
+    result: np.ndarray | None = None  # the verdict picture, while it is on screen
     try:
         while True:
             ok, bgr = cap.read()
@@ -208,15 +327,42 @@ def run(index: int, out: Path) -> int:
                 continue
             last_frame = time.monotonic()
             frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            fitter.submit(frame)
-            rect = fitter.latest[1] if fitter.latest else None
-            cv2.imshow(title, cv2.cvtColor(screen(frame, rect), cv2.COLOR_RGB2BGR))
+            if result is None:
+                fitter.submit(frame)
+                rect = fitter.latest[1] if fitter.latest else None
+                view = screen(frame, rect)
+            else:
+                view = _fit_width(result, VIEW_WIDTH)
+            cv2.imshow(title, cv2.cvtColor(view, cv2.COLOR_RGB2BGR))
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 return 0
-            if key == ord("s") and fitter.latest:
-                save(*fitter.latest, out)
+            if key == ord("c") and lab is not None:
+                try:
+                    if board is None:
+                        board = _connect()
+                    result = check_now(cap, board, lab, title)
+                except (OSError, cv2.error) as e:
+                    print(f"Could not check: {e}")
+                    if board is not None and isinstance(e, OSError):
+                        print(
+                            "If an LED stayed on, unplug and replug the USB cable "
+                            "to reset the board."
+                        )
+                    result = None
+            elif key == ord("s"):
+                if result is not None:
+                    out.mkdir(parents=True, exist_ok=True)
+                    path = out / time.strftime("%Y%m%d-%H%M%S_verdict.jpg")
+                    cv2.imwrite(str(path), cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
+                    print(f"saved {path}")
+                elif fitter.latest:
+                    save(*fitter.latest, out)
+            elif key != 255 and result is not None:
+                result = None
     finally:
+        if board is not None:
+            board.close()
         cap.release()
         cv2.destroyAllWindows()
 
@@ -226,10 +372,16 @@ def main() -> int:
     ap.add_argument("--camera", type=int, default=0, help="camera number (default 0)")
     ap.add_argument("--list", action="store_true", help="list working camera numbers")
     ap.add_argument("--out", default="out/live", help="where s saves (default out/live)")
+    ap.add_argument("--lab", type=Path, help="lab file; c then checks the wiring")
     args = ap.parse_args()
     if args.list:
         return list_cameras()
-    return run(args.camera, Path(args.out))
+    lab = None
+    if args.lab:
+        from blink import load_lab
+
+        lab = load_lab(args.lab)
+    return run(args.camera, Path(args.out), lab)
 
 
 if __name__ == "__main__":

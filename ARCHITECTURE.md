@@ -252,6 +252,12 @@ on that path, oriented anode-toward-positive." This accepts every functionally v
 arrangement automatically, including ones nobody enumerated, and it handles placement variation
 for free since properties do not care about columns.
 
+*Built for LED labs (2026-09-27), by measurement: `breadboard/verify.py`.* The lab file gives
+"pin N should light this LED". Blink and watch gives what each pin actually lit. The comparison
+produces checker-style findings: an LED dark, on the wrong pin, or on an unused pin, or a pin
+tied to ground. "Works" is withheld whenever anything was unclear. It deliberately skips
+building a full Netlist, because blinking cannot see legs or resistors.
+
 **Stage B — if it fails, what is the smallest fix?** Compute the minimum edit against whichever
 valid arrangement is closest to what the student actually built. The edit *is* the diagnosis:
 "move this one connection from here to there" rather than "wrong".

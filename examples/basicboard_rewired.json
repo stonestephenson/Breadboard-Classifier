@@ -1,0 +1,156 @@
+{
+  "board": "WB-102",
+  "name": "basicboard (rewired 2026-09-27)",
+  "components": [
+    {
+      "id": "MCU",
+      "type": "mcu",
+      "pins": {
+        "D2": {
+          "hole": "j44"
+        },
+        "D3": {
+          "hole": "j46"
+        },
+        "D4": {
+          "hole": "j48"
+        },
+        "D5": {
+          "hole": "j50"
+        },
+        "GND": {
+          "hole": "j58"
+        }
+      },
+      "origin": "factory"
+    },
+    {
+      "id": "R_green",
+      "type": "resistor",
+      "pins": {
+        "1": {
+          "hole": "j44"
+        },
+        "2": {
+          "hole": "j12"
+        }
+      },
+      "attrs": {
+        "ohms": 330
+      },
+      "origin": "factory"
+    },
+    {
+      "id": "LED_green",
+      "type": "led",
+      "pins": {
+        "anode": {
+          "hole": "j12"
+        },
+        "cathode": {
+          "hole": "j58"
+        }
+      },
+      "attrs": {
+        "color": "green"
+      },
+      "origin": "factory"
+    },
+    {
+      "id": "R_blue",
+      "type": "resistor",
+      "pins": {
+        "1": {
+          "hole": "j46"
+        },
+        "2": {
+          "hole": "j20"
+        }
+      },
+      "attrs": {
+        "ohms": 330
+      },
+      "origin": "factory"
+    },
+    {
+      "id": "LED_blue",
+      "type": "led",
+      "pins": {
+        "anode": {
+          "hole": "j20"
+        },
+        "cathode": {
+          "hole": "j58"
+        }
+      },
+      "attrs": {
+        "color": "blue"
+      },
+      "origin": "factory"
+    },
+    {
+      "id": "R_white",
+      "type": "resistor",
+      "pins": {
+        "1": {
+          "hole": "j48"
+        },
+        "2": {
+          "hole": "j28"
+        }
+      },
+      "attrs": {
+        "ohms": 330
+      },
+      "origin": "factory"
+    },
+    {
+      "id": "LED_white",
+      "type": "led",
+      "pins": {
+        "anode": {
+          "hole": "j28"
+        },
+        "cathode": {
+          "hole": "j58"
+        }
+      },
+      "attrs": {
+        "color": "white"
+      },
+      "origin": "factory"
+    },
+    {
+      "id": "R_red",
+      "type": "resistor",
+      "pins": {
+        "1": {
+          "hole": "j50"
+        },
+        "2": {
+          "hole": "j36"
+        }
+      },
+      "attrs": {
+        "ohms": 330
+      },
+      "origin": "factory"
+    },
+    {
+      "id": "LED_red",
+      "type": "led",
+      "pins": {
+        "anode": {
+          "hole": "j36"
+        },
+        "cathode": {
+          "hole": "j58"
+        }
+      },
+      "attrs": {
+        "color": "red"
+      },
+      "origin": "factory"
+    }
+  ]
+}

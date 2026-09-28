@@ -118,4 +118,6 @@ colour.
 - **No natural-language rendering.** Findings carry a `message`, but turning a set of findings
   into a paragraph for a student is a separate layer.
 - **Nothing produces a Netlist yet from a photo.** The probe produces pin connectivity; wiring
-  that into a Netlist is the next integration step.
+  that into a Netlist is the next integration step. For LED labs, `breadboard/verify.py` already
+  answers "does it work?" without one: it checks what each pin lit (blink and watch) against
+  what the lab file expects, and returns findings in this module's `Finding` type.

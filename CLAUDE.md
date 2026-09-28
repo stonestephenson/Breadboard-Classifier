@@ -24,6 +24,7 @@ Chrome on school-issued machines).
 | Electrical probe (`tools/probe.py`) | **Working on real hardware.** `docs/FIRMWARE_PROTOCOL.md` |
 | Rectifier (`breadboard/rectify.py`) | **Working on real photos**, and live on a webcam (`tools/live.py`). Built on the vendored breadboard-normalizer. `docs/SPIKE_RECTIFY.md` |
 | Blink and watch (`breadboard/blink.py`, `tools/blink.py`) | **Working on the real board.** Each LED found by its pin, colour and column, no trained model. |
+| Does it work? (`breadboard/verify.py`) | **Working.** Blink results checked against a lab file: findings plus a verdict drawn on the photo. Demo: `tools/live.py --camera 1 --lab examples/basicboard_rewired.json`, press `c`. |
 | Per-node occupancy from photos | Not started; a trained model needs data |
 | Lab reference circuits | BasicBoard and Activity 3 done; others need the curriculum |
 
@@ -35,9 +36,14 @@ one laptop, with no trained vision model:
 1. **Emit structured facts from the probe**, so the electrical channel feeds the checker.
 2. ~~Blink and watch~~ — done: `tools/blink.py --camera N`. It needs the board filling most of
    the frame and a lit room. Filmed from low across a dim desk, the board was often not found.
-3. **Score layout hypotheses.** Start from the lab's layout, try small variations (the
-   generator's six error types), and keep the one the evidence supports. Abstain on a tie.
-4. **Explain on the photo** (`Rectification.to_photo` inverts the warp), behind a one-button demo.
+3. ~~Check against the lab and explain on the photo~~ — done as `breadboard/verify.py`. It does
+   **not** build a full Netlist for `check.py`, because blinking cannot see legs, resistors or
+   wires, and inventing them would break the one principle. It is stage A (does it work?) by
+   measurement.
+4. **Stage B: say which leg to move.** For a dark LED, name the exact hole. This needs leg
+   positions, so either the trained model or classical detection of the unlit LED's body.
+   `examples/basicboard_rewired.json` is the user's own build; the real curriculum labs come
+   later.
 
 ## The one principle
 

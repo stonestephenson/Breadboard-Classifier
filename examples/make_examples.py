@@ -21,24 +21,32 @@ from breadboard.netlist import Component, Netlist, Pin
 HERE = Path(__file__).resolve().parent
 
 LEDS = [("D2", "red", 12), ("D3", "white", 20), ("D4", "green", 28), ("D5", "blue", 36)]
+# The same board as rewired by 2026-09-27, as blink and watch found it
+# (tools/blink.py): pin 2 green, 3 blue, 4 white, 5 red.
+REWIRED = [
+    ("D2", "green", 12),
+    ("D3", "blue", 20),
+    ("D4", "white", 28),
+    ("D5", "red", 36),
+]
 MCU_COL = {"D2": 44, "D3": 46, "D4": 48, "D5": 50}
 GND_COL = 58
 
 
-def basicboard() -> Netlist:
-    pins = {name: Pin(f"j{MCU_COL[name]}") for name, _, _ in LEDS}
+def basicboard(leds=LEDS, name: str = "basicboard") -> Netlist:
+    pins = {pin: Pin(f"j{MCU_COL[pin]}") for pin, _, _ in leds}
     pins["GND"] = Pin(f"j{GND_COL}")
     parts: list[Component] = [
         Component(id="MCU", type="mcu", origin="factory", pins=pins)
     ]
-    for name, colour, col in LEDS:
+    for pin, colour, col in leds:
         parts += [
             Component(
                 id=f"R_{colour}",
                 type="resistor",
                 origin="factory",
                 attrs={"ohms": 330},
-                pins={"1": Pin(f"j{MCU_COL[name]}"), "2": Pin(f"j{col}")},
+                pins={"1": Pin(f"j{MCU_COL[pin]}"), "2": Pin(f"j{col}")},
             ),
             Component(
                 id=f"LED_{colour}",
@@ -48,7 +56,11 @@ def basicboard() -> Netlist:
                 pins={"anode": Pin(f"j{col}"), "cathode": Pin(f"j{GND_COL}")},
             ),
         ]
-    return Netlist(name="basicboard", components=parts)
+    return Netlist(name=name, components=parts)
+
+
+def basicboard_rewired() -> Netlist:
+    return basicboard(REWIRED, "basicboard (rewired 2026-09-27)")
 
 
 def led_moved() -> Netlist:
@@ -212,6 +224,7 @@ EXAMPLES = {
     "activity3_wire_off_by_one.json": activity3_wire_off_by_one,
     "activity3_uncertain.json": activity3_uncertain,
     "basicboard.json": basicboard,
+    "basicboard_rewired.json": basicboard_rewired,
     "basicboard_led_moved.json": led_moved,
     "basicboard_led_reversed.json": led_reversed,
     "basicboard_uncertain.json": unsure_reading,

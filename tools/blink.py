@@ -2,6 +2,7 @@
 
     ./venv/bin/python tools/blink.py --camera 1       # run it on the board
     ./venv/bin/python tools/blink.py --replay DIR     # re-judge a saved run
+    ... --lab examples/basicboard_rewired.json        # and check it against a lab
 
 Needs the board on USB and a camera that sees the whole board, held still for
 the ~20 s a run takes. The laptop switches the output pins (2-10) on one at a
@@ -35,6 +36,8 @@ from live import first_frame, open_camera
 from probe import Board, autodetect
 
 from breadboard.blink import OUTPUT_PINS, Session, analyse, run_sequence
+from breadboard.netlist import Netlist, NetlistError
+from breadboard.verify import Verdict, verify
 
 SETTLE_S = 0.6  # after switching, let the LED and the camera's exposure settle
 SAMPLES = 6  # frames averaged per photo, to beat sensor noise
@@ -209,12 +212,122 @@ def draw(frames: dict[str, np.ndarray], session: Session) -> np.ndarray:
     return out
 
 
+VERDICT_COLOURS = {  # RGB
+    "ok": (40, 210, 80),
+    "error": (240, 60, 50),
+    "warning": (255, 170, 0),
+    "uncertain": (255, 170, 0),
+}
+
+
+def draw_verdict(photo: np.ndarray, session: Session, verdict: Verdict) -> np.ndarray:
+    """The photo with each lit LED circled by verdict, and the answer in a panel.
+
+    Green: that pin lit the LED the lab wants. Red: an LED lit on the wrong pin.
+    Amber: something doubtful or unexpected. A dark LED cannot be circled; nobody
+    knows where it is. That is said in the panel.
+    """
+    out = photo.copy()
+    scale = out.shape[1] / 1920
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    def text(t: str, org: tuple[int, int], colour: tuple[int, int, int], size: float):
+        for thickness, ink in ((6, (0, 0, 0)), (2, colour)):
+            cv2.putText(
+                out, t, org, font, size * scale, ink, max(1, round(thickness * scale))
+            )
+
+    lines: list[tuple[str, tuple[int, int, int], float]] = []
+    head = (
+        "ok"
+        if verdict.works
+        else (
+            "error"
+            if any(f.severity == "error" for f in verdict.findings)
+            else "uncertain"
+        )
+    )
+    lines.append((verdict.summary, VERDICT_COLOURS[head], 1.25))
+    width = out.shape[1] - round(60 * scale)
+    for f in verdict.findings:
+        colour = VERDICT_COLOURS.get(f.severity, (255, 255, 255))
+        for i, part in enumerate(_wrap(f.message, width, 0.9 * scale)):
+            lines.append((("- " if i == 0 else "  ") + part, colour, 0.9))
+        if f.suggestion:
+            for part in _wrap("-> " + f.suggestion, width, 0.8 * scale):
+                lines.append(("    " + part, (230, 230, 230), 0.8))
+    if verdict.caveat:
+        for part in _wrap(verdict.caveat, width, 0.8 * scale):
+            lines.append((part, (200, 200, 200), 0.8))
+
+    step = round(42 * scale)
+    panel_h = step * len(lines) + round(30 * scale)
+    shade = out[:panel_h].astype(np.float32) * 0.35
+    out[:panel_h] = shade.astype(np.uint8)
+    for i, (line, colour, size) in enumerate(lines):
+        text(line, (round(24 * scale), round(20 * scale) + step * (i + 1)), colour, size)
+    flagged: dict[int, str] = {}
+    for f in verdict.findings:
+        glow_pin = f.detail.get("glow")
+        if isinstance(glow_pin, int):
+            flagged.setdefault(glow_pin, f.severity)
+    for glow in session.glows.values():
+        if not glow.lit or glow.photo_xy is None:
+            continue
+        mark = "ok" if glow.pin in verdict.ok_pins else flagged.get(glow.pin, "warning")
+        colour = VERDICT_COLOURS[mark]
+        x, y = (round(v) for v in glow.photo_xy)
+        radius = round(30 * scale)
+        cv2.circle(out, (x, y), radius, colour, max(3, round(6 * scale)))
+        text(
+            str(glow.pin),
+            (x - round(10 * scale), y - radius - round(10 * scale)),
+            colour,
+            1.1,
+        )
+
+    return out
+
+
+def _wrap(line: str, width_px: int, font_scale: float) -> list[str]:
+    """Split text into lines that fit width_px at this font scale."""
+    words, rows, current = line.split(), [], ""
+    for word in words:
+        trial = f"{current} {word}".strip()
+        (w, _), _ = cv2.getTextSize(trial, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 2)
+        if w > width_px and current:
+            rows.append(current)
+            current = word
+        else:
+            current = trial
+    return [*rows, current] if current else rows
+
+
+def print_verdict(verdict: Verdict) -> None:
+    print(verdict.summary)
+    for f in verdict.findings:
+        print(f"  [{f.severity}] {f.message}")
+        if f.suggestion:
+            print(f"      -> {f.suggestion}")
+    if verdict.caveat:
+        print(f"  ({verdict.caveat})")
+
+
+def load_lab(path: Path) -> Netlist:
+    try:
+        return Netlist.from_json(json.loads(path.read_text()))
+    except (OSError, ValueError, NetlistError, KeyError) as e:
+        raise SystemExit(f"cannot read the lab file {path}: {e}") from e
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Light each LED in turn; find it on camera.")
     ap.add_argument("--camera", type=int, default=0, help="camera number (default 0)")
     ap.add_argument("--replay", type=Path, help="re-judge a saved run instead")
+    ap.add_argument("--lab", type=Path, help="check the result against this lab file")
     ap.add_argument("--out", type=Path, default=Path("out/blink"))
     args = ap.parse_args()
+    lab = load_lab(args.lab) if args.lab else None
 
     try:
         run = args.replay or record(args.camera, OUTPUT_PINS)
@@ -225,10 +338,20 @@ def main() -> int:
     session = analyse(frames, pins, shorted)
     print("\n".join(report(session, pins)))
 
+    verdict = verify(lab, session, pins) if lab is not None else None
+    if verdict is not None:
+        print()
+        print_verdict(verdict)
+        picture_rgb = draw_verdict(frames["base"], session, verdict)
+    else:
+        picture_rgb = draw(frames, session)
+
     args.out.mkdir(parents=True, exist_ok=True)
     picture = args.out / f"{run.name}.jpg"
-    cv2.imwrite(str(picture), cv2.cvtColor(draw(frames, session), cv2.COLOR_RGB2BGR))
+    cv2.imwrite(str(picture), cv2.cvtColor(picture_rgb, cv2.COLOR_RGB2BGR))
     print(f"\nframes   {run}\npicture  {picture}")
+    if verdict is not None:
+        return 0 if verdict.works else 1
     return 0 if session.rect is not None else 1
 
 
