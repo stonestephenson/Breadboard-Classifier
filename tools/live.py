@@ -42,6 +42,10 @@ from breadboard.rectify import (
 GOOD = (40, 200, 40)
 BAD = (255, 140, 0)
 VIEW_WIDTH = 1280  # on-screen width of each panel
+# An iPhone via Continuity Camera takes about 5 s to send its first real frame.
+WARMUP_SECONDS = 10.0
+# Tolerate a camera hiccup this long before giving up.
+STALL_SECONDS = 3.0
 CORNER_HOLES = ("a1", "j1", "a63", "j63")
 
 
@@ -127,15 +131,35 @@ def open_camera(index: int) -> cv2.VideoCapture:
     return cap
 
 
+def first_frame(cap: cv2.VideoCapture) -> np.ndarray | None:
+    """The first real frame, waiting out a slow start. None if none arrives."""
+    deadline = time.monotonic() + WARMUP_SECONDS
+    while time.monotonic() < deadline:
+        ok, frame = cap.read()
+        if ok and frame is not None and frame.any():
+            return frame
+        time.sleep(0.1)
+    return None
+
+
 def list_cameras() -> int:
     found = False
     for index in range(6):
         cap = open_camera(index)
-        ok, frame = cap.read()
+        if not cap.isOpened():
+            break  # cameras are numbered from 0 with no gaps
+        start = time.monotonic()
+        frame = first_frame(cap)
         cap.release()
-        if ok:
-            found = True
-            print(f"camera {index}: {frame.shape[1]} x {frame.shape[0]}")
+        if frame is None:
+            print(f"camera {index}: opened, but sent no picture")
+            continue
+        found = True
+        waited = time.monotonic() - start
+        slow = (
+            f"  (took {waited:.0f} s to start: probably an iPhone)" if waited > 2 else ""
+        )
+        print(f"camera {index}: {frame.shape[1]} x {frame.shape[0]}{slow}")
     if not found:
         print("No camera could be opened. " + _PERMISSION_HINT)
     return 0 if found else 1
@@ -165,15 +189,24 @@ def run(index: int, out: Path) -> int:
         return 1
     print("Loading the corner model (the first run downloads it, 83 MB)...")
     rectify(np.full((480, 640, 3), 255, np.uint8))  # load it before the window opens
+    print(f"Waiting for camera {index} (an iPhone takes a few seconds)...")
+    if first_frame(cap) is None:
+        print(f"Camera {index} opened but sent no picture. Is it awake and nearby?")
+        return 1
     fitter = Fitter()
     fitter.start()
     title = "breadboard live - q quits, s saves"
+    last_frame = time.monotonic()
     try:
         while True:
             ok, bgr = cap.read()
-            if not ok:
-                print("The camera stopped sending frames.")
-                return 1
+            if not ok or bgr is None:
+                if time.monotonic() - last_frame > STALL_SECONDS:
+                    print("The camera stopped sending frames.")
+                    return 1
+                time.sleep(0.02)
+                continue
+            last_frame = time.monotonic()
             frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             fitter.submit(frame)
             rect = fitter.latest[1] if fitter.latest else None
