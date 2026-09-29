@@ -235,6 +235,28 @@ def _placed(hole: str) -> tuple[int, int]:
     return round(x) + MARGIN, round(y) + MARGIN
 
 
+def _crowd(seed: int = 1):
+    """A board held by someone who fills most of the picture: returns a
+    function giving the picture with the board slid by board_shift and the
+    person by person_shift."""
+    rng = np.random.default_rng(seed)
+    size = (H + 2 * MARGIN + 700, W + 2 * MARGIN + 800)
+    person = rng.integers(0, 255, (size[0] // 4, size[1] // 4, 3)).astype(np.uint8)
+    person = cv2.resize(person, (size[1], size[0]), interpolation=cv2.INTER_NEAREST)
+    board = np.zeros_like(person)
+    board[: H + 2 * MARGIN, : W + 2 * MARGIN] = _held_board()
+    inside = np.zeros(size, np.uint8)
+    inside[MARGIN : MARGIN + H, MARGIN : MARGIN + W] = 1
+
+    def scene(board_shift, person_shift):
+        out = _moved(person, *person_shift)
+        shown = _moved(inside, *board_shift) > 0
+        out[shown] = _moved(board, *board_shift)[shown]
+        return out
+
+    return scene
+
+
 class TestAlignment:
     def test_a_drifting_board_is_lined_up(self):
         fitted = _held_board()
@@ -263,14 +285,36 @@ class TestAlignment:
         assert align_off(_moved(fitted, 6 * 16, 0), fitted, PLACED) is None
 
     def test_a_jump_between_on_and_off_is_not_lined_up(self):
-        # 0.6 s apart, a hand moved the board 0.4 pitch at most. A jump of most
-        # of a hole is too fast to trust, and close to where a repeating grid of
-        # holes could line up one hole over.
+        # 0.6 s apart, a hand moved the board 1.6 pitches at most. Over two
+        # pitches is too fast to trust.
         fitted = _held_board()
         off = _moved(fitted, 17, -9)
-        on = _moved(fitted, 17 + 13, -9)
+        on = _moved(fitted, 17 + 36, -9)
         off_warp = align_off(off, fitted, PLACED)
         assert off_warp is not None
+        assert align_on(on, off, off_warp, PLACED) is None
+
+    def test_the_person_holding_the_board_does_not_mislead_it(self):
+        # Filmed from further away, the person holding the board fills most of
+        # the picture, and moves differently. Between a pin's on and off photos,
+        # a first guess from the whole picture followed the person; this follows
+        # the board.
+        scene = _crowd()
+        off, on = scene((10, -4), (0, 0)), scene((20, 0), (-30, 12))
+        off_warp = np.array([[1, 0, 10], [0, 1, -4], [0, 0, 1]], float)
+        warp = align_on(on, off, off_warp, PLACED)
+        assert warp is not None
+        assert np.allclose(_where(warp, (700, 300)), (720, 300), atol=0.5)
+
+    def test_nothing_but_repeating_holes_is_a_tie_and_not_lined_up(self):
+        # Every hole looks like its neighbour, so one hole over matches as well.
+        fitted = np.full((H + 2 * MARGIN, W + 2 * MARGIN, 3), 150, np.uint8)
+        for x in range(MARGIN, MARGIN + W, 16):
+            for y in range(MARGIN, MARGIN + H, 16):
+                cv2.circle(fitted, (x, y), 3, (60, 55, 50), -1)
+        fitted = cv2.GaussianBlur(fitted, (0, 0), 1.0)
+        off, on = _moved(fitted, 3, 2), _moved(fitted, 5, 2)
+        off_warp = np.array([[1, 0, 3], [0, 1, 2], [0, 0, 1]], float)
         assert align_on(on, off, off_warp, PLACED) is None
 
     def test_too_little_unlit_board_to_line_up_on_is_not_lined_up(self):
@@ -321,6 +365,115 @@ class TestAlignment:
         }
         session = analyse(frames, [2])
         assert session.glows[2].status == "dark"
+
+    def test_a_photo_lined_up_one_hole_over_is_not_judged(self, monkeypatch):
+        # The holes repeat, so an alignment can lock one hole over and pass
+        # every other check. Each lit photo is lined up twice, via the unlit
+        # photos on either side; here one of the two slips, and they disagree.
+        monkeypatch.setattr(breadboard.blink, "rectify", lambda _image: PLACED)
+        real = breadboard.blink.align_on
+        calls = []
+
+        def one_slips(on, off, off_warp, rect):
+            warp = real(on, off, off_warp, rect)
+            calls.append(warp)
+            hole = np.array([[1, 0, 16], [0, 1, 0], [0, 0, 1]], float)
+            return hole @ warp if len(calls) == 1 and warp is not None else warp
+
+        monkeypatch.setattr(breadboard.blink, "align_on", one_slips)
+        fitted = _held_board()
+        frames = {
+            "base": fitted,
+            "pin2_on": _light(
+                _moved(fitted, 9, 4), np.add(_placed("c30"), (9, 4)), (0, 200, 120)
+            ),
+            "pin2_off": _moved(fitted, 12, 2),
+        }
+        session = analyse(frames, [2])
+        assert len(calls) == 2
+        assert session.moved == {2}
+
+    def test_a_slip_is_not_carried_to_the_next_pin(self, monkeypatch):
+        # Pin 2's off photo is lined up one hole over. Pin 2 is set aside; pin
+        # 3 must not build on that alignment, or both of its own would inherit
+        # the slip, agree, and put its LED a column off.
+        monkeypatch.setattr(breadboard.blink, "rectify", lambda _image: PLACED)
+        fitted = _held_board()
+        frames = {
+            "base": fitted,
+            "pin2_on": _moved(fitted, 2, 1),
+            "pin2_off": _moved(fitted, 4, 1),
+            "pin3_on": _light(
+                _moved(fitted, 6, 2), np.add(_placed("c20"), (6, 2)), (0, 200, 120)
+            ),
+            "pin3_off": _moved(fitted, 8, 2),
+        }
+        real = breadboard.blink.align_off
+
+        def slips_on_pin2(off, fitted_, rect, guess=None):
+            warp = real(off, fitted_, rect, guess)
+            if off is frames["pin2_off"] and warp is not None:
+                return np.array([[1, 0, 16], [0, 1, 0], [0, 0, 1]], float) @ warp
+            return warp
+
+        monkeypatch.setattr(breadboard.blink, "align_off", slips_on_pin2)
+        session = analyse(frames, [2, 3])
+        assert session.moved == {2}
+        assert session.glows[3].status == "lit"
+        assert session.glows[3].column == 20
+
+    def test_a_board_found_mid_run_is_followed_both_ways(self, monkeypatch):
+        # In a dim room the board may only be found on a later photo. Photos
+        # before it are lined up working backwards from it.
+        board = _held_board()
+        frames = {
+            "base": _moved(board, -6, 2),
+            "pin2_on": _light(
+                _moved(board, -4, 1), np.add(_placed("c30"), (-4, 1)), (0, 200, 120)
+            ),
+            "pin2_off": _moved(board, -2, 1),
+            "pin3_on": _moved(board, -1, 0),
+            "pin3_off": board,
+            "pin4_on": _light(
+                _moved(board, 3, -1), np.add(_placed("c20"), (3, -1)), (0, 200, 120)
+            ),
+            "pin4_off": _moved(board, 5, -2),
+        }
+        monkeypatch.setattr(
+            breadboard.blink,
+            "rectify",
+            lambda image: PLACED if image is frames["pin3_off"] else None,
+        )
+        session = analyse(frames, [2, 3, 4])
+        assert not session.moved
+        assert (session.glows[2].column, session.glows[4].column) == (30, 20)
+        assert session.glows[3].status == "dark"
+
+    def test_a_board_held_by_a_moving_person_is_followed(self, monkeypatch):
+        # The person moves differently from the board in every photo. A start
+        # from the whole picture follows the person; following the board from
+        # photo to photo does not.
+        monkeypatch.setattr(breadboard.blink, "rectify", lambda _image: PLACED)
+        scene = _crowd()
+        steps = [
+            ((3, 1), (-20, 8)),
+            ((6, 2), (15, -10)),
+            ((9, 2), (-25, 5)),
+            ((12, 3), (20, 12)),
+            ((14, 3), (-10, -15)),
+            ((16, 4), (25, 0)),
+        ]
+        shots = [scene(b, p) for b, p in steps]
+        board_at = [b for b, _ in steps]
+        shots[2] = _light(shots[2], np.add(_placed("c25"), board_at[2]), (0, 200, 120))
+        frames = {"base": scene((0, 0), (0, 0))}
+        for n, pin in enumerate([2, 3, 4]):
+            frames[f"pin{pin}_on"], frames[f"pin{pin}_off"] = shots[2 * n : 2 * n + 2]
+        session = analyse(frames, [2, 3, 4])
+        assert not session.moved
+        assert session.glows[3].status == "lit"
+        assert session.glows[3].column == 25
+        assert session.glows[2].status == session.glows[4].status == "dark"
 
     def test_photos_that_cannot_be_lined_up_are_not_judged(self, monkeypatch):
         monkeypatch.setattr(breadboard.blink, "rectify", lambda _image: PLACED)
@@ -434,10 +587,12 @@ RUNS = Path(__file__).resolve().parent.parent / "data" / "cache" / "blink"
 
 # Runs of the BasicBoard as rewired by 2026-09-27. First, a dim room filmed
 # from low across the desk. Second, a lit room with the phone higher, the board
-# filling the frame. Then two with the phone fixed and the board held up to it
-# in two hands (2026-09-28); it drifted up to 2.3 pitches over each run. What lit
-# was checked by eye in the frames: pin 2 green, 3 blue, 4 white, 5 red, nothing
-# on the other pins. The glow centres were checked to sit on each LED's body.
+# filling the frame. Then four with the phone fixed and the board held by hand
+# (2026-09-28); it drifted up to 3.4 pitches over a run. The third was held in
+# front of the body, small in the picture; the fourth over a dark desk, where it
+# jumped over a pitch between one pin's photos. Both failed live before the
+# board search in align_on. What lit was checked by eye in the frames: pin 2
+# green, 3 blue, 4 white, 5 red, nothing on the other pins. The glow centres were checked to sit on each LED's body.
 # The columns differ by one between runs because the LED bodies stand above the
 # board and the viewpoint changed.
 LEDS = {
@@ -465,7 +620,24 @@ LEDS = {
         4: ("white", 19),
         5: ("red", 15),
     },
+    "basicboard-2026-09-28-handheld-3": {
+        2: ("green", 30),
+        3: ("blue", 25),
+        4: ("white", 19),
+        5: ("red", 15),
+    },
+    "basicboard-2026-09-28-handheld-4": {
+        2: ("green", 29),
+        3: ("blue", 25),
+        4: ("white", 19),
+        5: ("red", 15),
+    },
 }
+# Pins that may be set aside rather than judged. In handheld-4, the white LED
+# lit most of the board while it jumped 1.6 pitches, and its photo could only be
+# lined up one way, so there was no second alignment to check it against. Pin 5
+# then has to be checked against the photo before pin 4's, across the jump.
+MAY_BE_SET_ASIDE = {"basicboard-2026-09-28-handheld-4": {4, 5}}
 
 
 @pytest.fixture(scope="module", params=sorted(LEDS))
@@ -479,25 +651,28 @@ def recorded(request):
         image = cv2.imread(str(path))
         assert image is not None
         frames[path.stem] = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    return analyse(frames, meta["pins"]), meta["pins"], LEDS[request.param]
+    set_aside = MAY_BE_SET_ASIDE.get(request.param, set())
+    return analyse(frames, meta["pins"]), meta["pins"], LEDS[request.param], set_aside
 
 
 class TestRecordedRuns:
     def test_the_board_is_found(self, recorded):
-        session, _, _ = recorded
+        session, _, _, _ = recorded
         assert session.rect is not None
 
     def test_each_led_is_found_by_its_pin_with_its_colour(self, recorded):
-        session, _, leds = recorded
+        session, _, leds, set_aside = recorded
         for pin, (colour, column) in leds.items():
+            if pin in set_aside and pin in session.moved:
+                continue
             glow = session.glows[pin]
             assert glow.status == "lit", f"pin {pin}: {glow.note}"
             assert glow.colour == colour, f"pin {pin}"
-            # The LED's body spans about two columns; the claim is "to a column".
-            assert glow.column is not None
-            assert abs(glow.column - column) <= 1, f"pin {pin} at {glow.hole}"
+            # The column exactly as seen by eye, so a photo lined up one hole
+            # over would show here.
+            assert glow.column == column, f"pin {pin} at {glow.hole}"
 
     def test_pins_without_an_led_are_dark(self, recorded):
-        session, pins, leds = recorded
+        session, pins, leds, set_aside = recorded
         assert all(session.glows[p].status == "dark" for p in pins if p not in leds)
-        assert not session.moved
+        assert session.moved <= set_aside

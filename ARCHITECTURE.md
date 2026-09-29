@@ -217,7 +217,14 @@ Two capabilities this unlocks beyond plain connectivity:
   before comparing. Lining up on brightness failed: the alignment bent the photo to explain the
   glow away. Lining up on fine detail (holes, wire edges), which a smooth glow barely touches,
   and allowing only a slide between a pin's on and off photos, got all four LEDs right on both
-  hand-held runs. Colour is read 1.5-3 pitches out, past where the overloaded sensor bleeds
+  hand-held runs. The first estimate of that slide must come from the board alone (a search of
+  every slide, which must clearly beat one a hole over): from the whole picture it followed the
+  person holding the board. Because the holes repeat, an alignment can lock one hole over and
+  pass every other check, putting an LED a column off. So alignments form a chain of trust,
+  outward from the photo the board was fitted on: the board is followed photo by photo, each lit
+  photo is lined up twice (via the unlit photos on either side), and an unlit photo is trusted
+  only when the two agree, at the board's centre and at the LED. Otherwise that pin is set aside
+  and the next is checked against the last trusted photo, so a slip cannot carry forward. Colour is read 1.5-3 pitches out, past where the overloaded sensor bleeds
   into every channel.
 
 Remaining dependency is no longer firmware but the **web app**: whether our code may send raw

@@ -85,19 +85,34 @@ SPILL_BAND = (1.5, 3.0)
 MIN_SPILL = 60.0
 # Photos are lined up at this scale, for speed; the result is sub-pixel anyway.
 ALIGN_SCALE = 0.5
-ALIGN_STOP = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 60, 1e-4)
+# Refining stops when the match improves by less than this per step. At 1e-4 it
+# often ran all 60 steps, eight times slower, for results identical on the
+# recorded runs.
+ALIGN_STOP = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 60, 1e-3)
 # Lining up is trusted only when the photos then match this well (correlation of
 # the board's brightness, 0-1). Hand-held photos matched 0.85-0.99, still ones
 # 0.99. One dragged off by an LED's glow matched 0.4-0.7.
 MIN_ALIGN_MATCH = 0.8
 # How far the board may drift, in pitches: over a whole check, and between the
 # photos with a pin on and off (0.6 s apart). Hand-held, it drifted up to 2.3
-# pitches over a check, and 0.4 between on and off.
+# pitches over a check (3.4 with the board further away), and up to 1.6
+# between on and off.
 MAX_DRIFT_PITCHES = 5.0
-MAX_STEP_PITCHES = 0.6
-# The holes repeat every pitch, so a fine alignment can lock on one hole over.
-# The rough first estimate, from the whole picture, cannot; between on and off
-# the two agreed to within 0.22 pitch. Further apart than this, it slipped.
+MAX_STEP_PITCHES = 2.0
+# The first estimate tries every slide of the board's detail within reach. The
+# holes repeat every pitch, so a slide one hole over can match nearly as well.
+# The best slide must beat the next-best separate match by this much
+# (correlation, 0-1), or it is a near tie. On nine recorded runs the best led by
+# 0.13-0.69. Blur from a moving hand makes neighbouring holes alike, so the lead
+# is often small, and this only catches near ties. A slide one hole over that
+# passes it would put an LED one column off while every other check passes, so
+# analyse also lines each photo with a pin on up twice, via the unlit photos on
+# either side, and keeps a chain of trusted alignments (see there).
+MIN_SEARCH_LEAD = 0.1
+# Two estimates of the same position further apart than this, and one of them
+# has slipped toward a neighbouring hole: the fine alignment against its first
+# estimate, or analyse's two alignments of one photo. Real pairs of estimates
+# agreed within 0.25 pitch; a slip is about one.
 MAX_DISAGREE_PITCHES = 0.5
 # The share of the board that must be left to align on, once pixels a glow has
 # saturated are left out.
@@ -338,7 +353,9 @@ class Session:
     rect is the board fit used for every frame. It is None when no frame gave a
     usable fit, and then nothing else is judged. glows holds a result for every
     pin that was judged. moved holds pins not judged because their photos could
-    not be lined up: the board or camera moved too much, or too fast. shorted
+    not be lined up with confidence: the board or camera moved too much or too
+    fast, the two alignments of its lit photo disagreed, or there was no trusted
+    unlit photo near enough to check against (see analyse). shorted
     holds pins that did not go high when switched on, and so were switched
     straight back off.
     """
@@ -373,10 +390,39 @@ def _shrink(mask: np.ndarray, like: np.ndarray) -> np.ndarray:
     )
 
 
-def _shift(fixed: np.ndarray, moving: np.ndarray) -> np.ndarray:
-    """A rough start: the translation that best lines moving up with fixed."""
-    window = cv2.createHanningWindow((fixed.shape[1], fixed.shape[0]), cv2.CV_32F)
-    (dx, dy), _ = cv2.phaseCorrelate(fixed, moving, window)
+def _search(
+    fixed: np.ndarray, moving: np.ndarray, corners: np.ndarray, reach: float, pitch: float
+) -> np.ndarray | None:
+    """The slide, in small pixels, that best lines up the board in two detail
+    images, tried at every position within reach pitches. corners are the
+    board's in fixed, full size. None if the best slide does not clearly beat
+    one a hole over (MIN_SEARCH_LEAD).
+
+    Only the board is compared, inset by a pitch. The whole picture would also
+    weigh the person holding it, who does not move with the board.
+    """
+    x0, y0 = np.ceil((corners.min(axis=0) + pitch) * ALIGN_SCALE).astype(int)
+    x1, y1 = np.floor((corners.max(axis=0) - pitch) * ALIGN_SCALE).astype(int)
+    x0, y0 = max(x0, 0), max(y0, 0)
+    x1, y1 = min(x1, fixed.shape[1]), min(y1, fixed.shape[0])
+    near = round(reach * pitch * ALIGN_SCALE)
+    sx0, sy0 = max(x0 - near, 0), max(y0 - near, 0)
+    sx1, sy1 = min(x1 + near, moving.shape[1]), min(y1 + near, moving.shape[0])
+    template, window = fixed[y0:y1, x0:x1], moving[sy0:sy1, sx0:sx1]
+    if template.size == 0 or any(
+        w < t for w, t in zip(window.shape, template.shape, strict=True)
+    ):
+        return None
+    scores = cv2.matchTemplate(window, template, cv2.TM_CCOEFF_NORMED)
+    _, best, _, (bx, by) = cv2.minMaxLoc(scores)
+    yy, xx = np.mgrid[: scores.shape[0], : scores.shape[1]]
+    apart = np.hypot(xx - bx, yy - by) >= 0.5 * pitch * ALIGN_SCALE
+    peaks = scores >= cv2.dilate(scores, np.ones((3, 3), np.uint8))
+    others = peaks & apart  # separate matches, not the best one's own slope
+    runner_up = float(scores[others].max()) if others.any() else -1.0
+    if best - runner_up < MIN_SEARCH_LEAD:
+        return None
+    dx, dy = bx + sx0 - x0, by + sy0 - y0
     return np.array([[1, 0, dx], [0, 1, dy], [0, 0, 1]], np.float32)
 
 
@@ -411,19 +457,38 @@ def _farthest(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def align_off(
-    off: np.ndarray, fitted: np.ndarray, rect: Rectification
+    off: np.ndarray,
+    fitted: np.ndarray,
+    rect: Rectification,
+    guess: np.ndarray | None = None,
 ) -> np.ndarray | None:
     """The warp taking each pixel of the fitted photo to the same point of the
     board in off, a photo with every pin off. None if they cannot be lined up.
 
+    guess, if given, is a warp close to the answer, from following the board
+    photo by photo (track). Without it, the start comes from the whole picture.
+
     Both photos are unlit, so the whole board's brightness can be used to line
     them up. (Its fine detail is less reliable here: a shaking hand blurs each
-    averaged photo differently.)
+    averaged photo differently.) A start from the whole picture can be a hole or
+    so out, since the person holding the board moves too, and on one hand-held
+    run the alignment then locked one hole over. A search for the best slide
+    straight to the fitted photo did worse: over a whole check the board also
+    turns, and no single slide stood out. Following it photo by photo, 1.2 s
+    apart, it barely turns between any two.
     """
     pitch = photo_pitch(rect)
     fixed, moving = _small_grey(fitted), _small_grey(off)
+    if guess is None:
+        size = (fixed.shape[1], fixed.shape[0])
+        window = cv2.createHanningWindow(size, cv2.CV_32F)
+        (dx, dy), _ = cv2.phaseCorrelate(fixed, moving, window)
+        start = np.array([[1, 0, dx], [0, 1, dy], [0, 0, 1]], np.float32)
+    else:
+        scale = np.diag([ALIGN_SCALE, ALIGN_SCALE, 1.0])
+        start = (scale @ guess @ np.linalg.inv(scale)).astype(np.float32)
     mask = _shrink(board_mask(fitted.shape, rect), fixed)
-    found = _refine(fixed, moving, mask, cv2.MOTION_HOMOGRAPHY, _shift(fixed, moving))
+    found = _refine(fixed, moving, mask, cv2.MOTION_HOMOGRAPHY, start)
     if found is None or found[1] < MIN_ALIGN_MATCH:
         return None
     warp = found[0]
@@ -436,7 +501,8 @@ def align_on(
     on: np.ndarray, off: np.ndarray, off_warp: np.ndarray, rect: Rectification
 ) -> np.ndarray | None:
     """The warp from the fitted photo to on, a photo with one pin on, found via
-    off, the same pin's photo with it off. off_warp is align_off's for off.
+    off, a photo with every pin off taken just before or after it. off_warp is
+    align_off's for off.
 
     Lined up on fine detail, which the LED's smooth glow barely touches. Its
     saturated centre has no detail at all, and its edge would look like movement,
@@ -450,7 +516,20 @@ def align_on(
     pitch = photo_pitch(rect)
     grey_fixed, grey_moving = _small_grey(off), _small_grey(on)
     fixed, moving = _detail(grey_fixed, pitch), _detail(grey_moving, pitch)
-    start = _shift(grey_fixed, grey_moving)
+    grow = np.ones((int(2 * pitch * ALIGN_SCALE) | 1,) * 2, np.uint8)
+    blank = [  # a saturated patch has no detail, and its edge is new
+        cv2.dilate((g >= SATURATED).astype(np.uint8), grow) > 0
+        for g in (grey_fixed, grey_moving)
+    ]
+    start = _search(
+        np.where(blank[0], 0, fixed),
+        np.where(blank[1], 0, moving),
+        _corners(rect, off_warp),
+        MAX_STEP_PITCHES + 0.5,
+        pitch,
+    )
+    if start is None:
+        return None
     size = (fixed.shape[1], fixed.shape[0])
     board = cv2.warpPerspective(
         board_mask(off.shape, rect), off_warp, (off.shape[1], off.shape[0])
@@ -461,17 +540,15 @@ def align_on(
         >= SATURATED
     )
     white = (grey_fixed >= SATURATED) | lit
-    white = cv2.dilate(
-        white.astype(np.uint8), np.ones((int(2 * pitch * ALIGN_SCALE) | 1,) * 2, np.uint8)
-    )
+    white = cv2.dilate(white.astype(np.uint8), grow)
     keep = board & (1 - white)
     if keep.sum() < MIN_ALIGN_SHARE * max(int(board.sum()), 1):
         return None
     found = _refine(fixed, moving, keep, cv2.MOTION_TRANSLATION, start)
     if found is None:
         return None
-    slide, rough = found[0][:2, 2], start[:2, 2] / ALIGN_SCALE
-    if np.hypot(*(slide - rough)) > MAX_DISAGREE_PITCHES * pitch:
+    slide, first = found[0][:2, 2], start[:2, 2] / ALIGN_SCALE
+    if np.hypot(*(slide - first)) > MAX_DISAGREE_PITCHES * pitch:
         return None
     on_warp = found[0] @ off_warp
     if (
@@ -480,6 +557,73 @@ def align_on(
     ):
         return None
     return on_warp
+
+
+def track(
+    before: np.ndarray, before_warp: np.ndarray, after: np.ndarray, rect: Rectification
+) -> np.ndarray | None:
+    """A guess at align_off's warp for after, from a trusted unlit photo near it
+    in time (before, usually 1.2 s away) and that photo's warp: the best slide
+    of the board between the two. None if no slide clearly wins."""
+    pitch = photo_pitch(rect)
+    found = _search(
+        _detail(_small_grey(before), pitch),
+        _detail(_small_grey(after), pitch),
+        _corners(rect, before_warp),
+        2 * MAX_STEP_PITCHES + 0.5,
+        pitch,
+    )
+    if found is None:
+        return None
+    scale = np.diag([ALIGN_SCALE, ALIGN_SCALE, 1.0])
+    return np.linalg.inv(scale) @ found.astype(np.float64) @ scale @ before_warp
+
+
+def _gap(a: np.ndarray, b: np.ndarray, xy: np.ndarray | tuple[float, float]) -> float:
+    """How far apart two warps put one point of the fitted photo, in pixels."""
+    point = np.asarray(xy, np.float64).reshape(1, 1, 2)
+    pa, pb = (cv2.perspectiveTransform(point, w)[0, 0] for w in (a, b))
+    return float(np.hypot(*(pa - pb)))
+
+
+def _step(
+    pin: int,
+    on: np.ndarray,
+    anchor: np.ndarray,
+    anchor_warp: np.ndarray,
+    new: np.ndarray,
+    fitted: np.ndarray,
+    rect: Rectification,
+) -> tuple[np.ndarray, Glow] | None:
+    """Line up new, an unlit photo next to a trusted one (anchor), and judge on,
+    the lit photo between them. Returns new's warp, now trusted, and the result;
+    None if they cannot be lined up with confidence.
+
+    on is lined up twice: via new, and via the trusted anchor. The two must put
+    the board in the same place, at its centre and at the LED if one lit.
+    """
+    pitch = photo_pitch(rect)
+    new_warp = align_off(new, fitted, rect, track(anchor, anchor_warp, new, rect))
+    if new_warp is None:
+        return None
+    via_new = align_on(on, new, new_warp, rect)
+    via_anchor = align_on(on, anchor, anchor_warp, rect)
+    if via_new is None or via_anchor is None:
+        return None
+    limit = MAX_DISAGREE_PITCHES * pitch
+    if _gap(via_new, via_anchor, _corners(rect).mean(axis=0)) > limit:
+        return None
+    seen = seen_by(via_new, on, fitted) & seen_by(new_warp, new, fitted)
+    glow = find_glow(
+        pin,
+        warp_onto(on, via_new, fitted),
+        warp_onto(new, new_warp, fitted),
+        rect,
+        seen,
+    )
+    if glow.photo_xy is not None and _gap(via_new, via_anchor, glow.photo_xy) > limit:
+        return None  # agree at the centre but not here: the board turned
+    return new_warp, glow
 
 
 def seen_by(warp: np.ndarray, image: np.ndarray, like: np.ndarray) -> np.ndarray:
@@ -511,39 +655,48 @@ def analyse(
     frames holds RGB frames: "base" with every pin off, then "pin<N>_on" and
     "pin<N>_off" for each pin that was photographed, in the order of pins.
 
-    The board is fitted once, on the first frame that fits (a lit LED can spoil
-    the fit, so unlit frames go first). Every other photo is lined up with that
-    one on the board itself, so the board or camera may drift during the run. A
-    pin whose photos cannot be lined up is set aside rather than misread.
+    The board is fitted once, on the first unlit frame that fits. Every other
+    photo is lined up with that one on the board itself, so the board or camera
+    may drift during the run.
+
+    The holes repeat, so an alignment can lock one hole over and pass every
+    other check, which would put an LED a column off. So alignments form a chain
+    of trust. The fitted photo is trusted. Working outward from it, in both
+    directions, each unlit photo is followed from the nearest trusted one
+    (track), lined up with the fitted photo (align_off), and trusted only if the
+    lit photo between them lines up the same way via both (_step). Otherwise
+    that pin is set aside, and the next one is checked against the last trusted
+    photo instead, so one slip cannot carry into later pins.
     """
-    order = ["base"] + [f"pin{p}_off" for p in pins] + [f"pin{p}_on" for p in pins]
-    rect, fitted = None, None
-    for name in order:
-        if name in frames:
-            candidate = rectify(frames[name])
+    photographed = [p for p in pins if f"pin{p}_on" in frames and f"pin{p}_off" in frames]
+    # Unlit photos in time order; the lit photo of photographed[k] sits between
+    # unlit[k] and unlit[k + 1].
+    unlit = [frames.get("base")] + [frames[f"pin{p}_off"] for p in photographed]
+    rect, fitted, start = None, None, 0
+    for i, image in enumerate(unlit):
+        if image is not None:
+            candidate = rectify(image)
             if candidate is not None and candidate.ok:
-                rect, fitted = candidate, frames[name]
+                rect, fitted, start = candidate, image, i
                 break
     if rect is None or fitted is None:
         return Session(rect=None, shorted=frozenset(shorted))
 
     glows: dict[int, Glow] = {}
     moved: set[int] = set()
-    for pin in pins:
-        on, off = frames.get(f"pin{pin}_on"), frames.get(f"pin{pin}_off")
-        if on is None or off is None:
-            continue
-        off_warp = align_off(off, fitted, rect)
-        on_warp = None if off_warp is None else align_on(on, off, off_warp, rect)
-        if off_warp is None or on_warp is None:
-            moved.add(pin)
-            continue
-        seen = seen_by(on_warp, on, fitted) & seen_by(off_warp, off, fitted)
-        glows[pin] = find_glow(
-            pin,
-            warp_onto(on, on_warp, fitted),
-            warp_onto(off, off_warp, fitted),
-            rect,
-            seen,
-        )
+    for direction in (1, -1):
+        anchor: np.ndarray = fitted
+        anchor_warp = np.eye(3)
+        i = start + direction
+        while 0 <= i < len(unlit):
+            pin = photographed[i - 1 if direction == 1 else i]
+            new, on = unlit[i], frames[f"pin{pin}_on"]
+            done = None
+            if new is not None:
+                done = _step(pin, on, anchor, anchor_warp, new, fitted, rect)
+            if new is None or done is None:
+                moved.add(pin)
+            else:
+                anchor, (anchor_warp, glows[pin]) = new, done
+            i += direction
     return Session(rect, glows, frozenset(moved), frozenset(shorted))
