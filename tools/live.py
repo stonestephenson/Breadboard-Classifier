@@ -14,7 +14,9 @@ out/live/.
 
 With --lab and the board on USB, c checks the wiring. It blinks each LED in turn
 while you watch (tools/blink.py), then shows what works and what to fix, drawn on
-the picture. Any key returns to the live view; c checks again.
+the picture. Any key returns to the live view; c checks again. Each check's
+photos are saved to data/cache/blink/<time>/, so tools/blink.py --replay can
+judge it again.
 
 The rectifier takes about 0.2 s a frame, so it runs in a background thread on
 the newest frame while the video keeps playing. If the board moves, the overlay
@@ -215,11 +217,11 @@ class _Watched:
 
 
 def check_now(
-    cap: cv2.VideoCapture, board: Board, lab: Netlist, title: str
+    cap: cv2.VideoCapture, board: Board, lab: Netlist, title: str, camera: int
 ) -> np.ndarray:
     """Blink and watch through the live window. Returns the verdict picture, RGB."""
     # Imported here: blink.py imports this module's camera helpers.
-    from blink import SAMPLES, SETTLE_S, draw_verdict, print_verdict
+    from blink import SAMPLES, SETTLE_S, draw_verdict, print_verdict, save_run
 
     from breadboard.blink import OUTPUT_PINS, analyse, run_sequence
     from breadboard.verify import verify
@@ -266,6 +268,10 @@ def check_now(
             board.resync()  # restore is write-only, so it runs either way
         board.restore(snapshot)
     show(cv2.cvtColor(frames["base"], cv2.COLOR_RGB2BGR), "Working it out...")
+    try:
+        print(f"saved the photos to {save_run(frames, OUTPUT_PINS, shorted, camera)}")
+    except OSError as e:  # the check itself went fine; only the copy failed
+        print(f"could not save the photos: {e}")
     session = analyse(frames, OUTPUT_PINS, shorted)
     result = verify(lab, session, OUTPUT_PINS)
     print_verdict(result)
@@ -343,7 +349,7 @@ def run(index: int, out: Path, lab: Netlist | None = None) -> int:
                 try:
                     if board is None:
                         board = _connect()
-                    result = check_now(cap, board, lab, title)
+                    result = check_now(cap, board, lab, title, index)
                 except (OSError, cv2.error) as e:
                     print(f"Could not check: {e}")
                     if board is not None and isinstance(e, OSError):

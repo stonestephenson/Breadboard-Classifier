@@ -8,7 +8,7 @@ The behaviours that matter:
 - Every way a pin can go wrong gets its own plain answer. It points at the fix
   when the evidence shows one, and never blames an LED that is doing its job.
 - "Your wiring works" is the hardest answer to earn. Anything untestable,
-  anything unclear on any pin, a camera that moved, or an imperfect view of the
+  anything unclear on any pin, photos that could not be lined up, or an imperfect view of the
   board withholds it.
 """
 
@@ -228,7 +228,7 @@ class TestVerify:
             {"glows": {8: Glow(8, "unclear", "the board brightened")}},
             {"moved": frozenset({9})},
         ],
-        ids=["unclear", "camera moved", "unclear unused pin", "moved on unused pin"],
+        ids=["unclear", "moved", "unclear unused pin", "moved on unused pin"],
     )
     def test_doubt_about_any_pin_withholds_the_all_clear(self, overrides):
         verdict = verify(BASICBOARD, _session(AS_BUILT, **overrides), PINS)

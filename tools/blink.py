@@ -4,11 +4,13 @@
     ./venv/bin/python tools/blink.py --replay DIR     # re-judge a saved run
     ... --lab examples/basicboard_rewired.json        # and check it against a lab
 
-Needs the board on USB and a camera that sees the whole board, held still for
-the ~20 s a run takes. The laptop switches the output pins (2-10) on one at a
-time, by writing the pin registers through the shipped sketch's memory commands
-(tools/probe.py Board.drive_only). The camera photographs the board with each
-pin on and then off, and breadboard/blink.py works out what lit.
+Needs the board on USB, a lit room, and a camera that sees the whole board for
+the ~20 s a run takes. The board can be held in a hand: the photos are lined up
+on the board before they are compared. The laptop switches the output pins
+(2-10) on one at a time, by writing the pin registers through the shipped
+sketch's memory commands (tools/probe.py Board.drive_only). The camera
+photographs the board with each pin on and then off, and breadboard/blink.py
+works out what lit.
 
 It prints one line per pin, and writes:
   data/cache/blink/<time>/   the frames, so the run can be re-judged (--replay)
@@ -130,10 +132,22 @@ def record(camera: int, pins: tuple[int, ...]) -> Path:
         if grabber is None or not grabber.is_alive():
             cap.release()
 
+    return save_run(frames, pins, shorted, camera)
+
+
+def save_run(
+    frames: dict[str, np.ndarray],
+    pins: tuple[int, ...],
+    shorted: list[int],
+    camera: int,
+) -> Path:
+    """Save a run's frames to data/cache/blink/<time>/, for --replay."""
     run = SESSIONS / time.strftime("%Y%m%d-%H%M%S")
     run.mkdir(parents=True, exist_ok=True)
     for name, frame in frames.items():
-        cv2.imwrite(str(run / f"{name}.png"), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+        path = run / f"{name}.png"
+        if not cv2.imwrite(str(path), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)):
+            raise OSError(f"could not write {path}")
     meta = {"camera": camera, "pins": list(pins), "shorted": shorted}
     (run / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
     return run
@@ -159,7 +173,7 @@ def report(session: Session, pins: list[int]) -> list[str]:
         if pin in session.shorted:
             lines.append(f"pin {pin:>2}  did not go high: tied to ground? Switched off.")
         elif pin in session.moved:
-            lines.append(f"pin {pin:>2}  not judged: the camera moved")
+            lines.append(f"pin {pin:>2}  not judged: its photos could not be lined up")
         elif glow is None:
             lines.append(f"pin {pin:>2}  not judged: no pictures")
         elif glow.status == "lit":

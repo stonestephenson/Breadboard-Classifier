@@ -18,9 +18,16 @@ white core* does: pixels saturated in every channel with the pin on, but not wit
 it off, inside the board's outline. Its centre marks the LED, and the colour of
 the spill around it names the LED's colour.
 
+The board may be held in a hand, so it drifts between photos. Before comparing
+them, each photo is warped onto the one the board was fitted on, lining them up
+on the board itself (align). The LED's own glow is left out when lining up a
+photo with the LED on, or the alignment would try to explain the glow as
+movement. A pin whose photos cannot be lined up is not judged.
+
 When unsure, it says so. Each pin comes out "lit", "dark" or "unclear". Unclear
 means something changed that does not look like a single LED:
 - the board brightened with no white core (a dim LED, or the room light changed);
+- a white spot appeared with no glow around it (a glint as the board tilts);
 - light appeared in two places;
 - a "core" covered much of the board.
 A dark pin claims its branch is broken, so it is only reported when the board
@@ -60,13 +67,41 @@ MAX_CORE_SHARE = 0.3
 # places. The white LED's own bright patches sat 2.8 pitches from its centre.
 SEPARATE_PITCHES = 4.0
 # Mean brightness change over the board, 0-255, above which "no core" does not
-# mean dark. Pins with an LED changed it by 33-142; empty pins by under 3.
+# mean dark. Measured on photos blurred by a pitch, so the edges left by a
+# slightly imperfect alignment do not count. Pins with an LED changed it by
+# 30-142; empty pins by under 3, hand-held too.
 SPILL_LEVELS = 10.0
-# The spill is measured in a ring this many pixels beyond the core.
-RING_PX = 30
-# A frame shifted by more than this, in photo pixels, relative to the frame the
-# board was fitted on, came from a moved camera and is not judged.
-MAX_SHIFT_PX = 2.0
+# The spill's colour is read this many pitches out from the core. Nearer in, the
+# overloaded sensor bleeds into every channel: a red LED looks orange there, and
+# a blue one picks up red and green. Seven recorded runs, still and hand-held,
+# read cleanly at this distance. Pixels still saturated there are left out.
+SPILL_BAND = (1.5, 3.0)
+# A real LED raises the board around it by 136-210 levels in its strongest
+# channel, at that distance. A white spot with no such glow is a glint; cores
+# faked by a deliberately misaligned photo had at most 14. (This is not relative
+# to the board as a whole, because in a dim room an LED lights the whole board
+# about as much as its surroundings. So a glint that coincides with the whole
+# board brightening by this much would pass.)
+MIN_SPILL = 60.0
+# Photos are lined up at this scale, for speed; the result is sub-pixel anyway.
+ALIGN_SCALE = 0.5
+ALIGN_STOP = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 60, 1e-4)
+# Lining up is trusted only when the photos then match this well (correlation of
+# the board's brightness, 0-1). Hand-held photos matched 0.85-0.99, still ones
+# 0.99. One dragged off by an LED's glow matched 0.4-0.7.
+MIN_ALIGN_MATCH = 0.8
+# How far the board may drift, in pitches: over a whole check, and between the
+# photos with a pin on and off (0.6 s apart). Hand-held, it drifted up to 2.3
+# pitches over a check, and 0.4 between on and off.
+MAX_DRIFT_PITCHES = 5.0
+MAX_STEP_PITCHES = 0.6
+# The holes repeat every pitch, so a fine alignment can lock on one hole over.
+# The rough first estimate, from the whole picture, cannot; between on and off
+# the two agreed to within 0.22 pitch. Further apart than this, it slipped.
+MAX_DISAGREE_PITCHES = 0.5
+# The share of the board that must be left to align on, once pixels a glow has
+# saturated are left out.
+MIN_ALIGN_SHARE = 0.15
 # The pins the shipped LbyM sketch sets up as outputs, and so can light an LED.
 # 11 and 12 are inputs with pull-ups; "switching them off" would disable those.
 OUTPUT_PINS = tuple(range(2, 11))
@@ -129,20 +164,26 @@ def photo_pitch(rect: Rectification) -> float:
 def glow_colour(increase: np.ndarray) -> str:
     """A coarse colour name for the mean RGB brightness increase in the spill.
 
-    Single-colour LEDs give almost nothing in the channel opposite their own,
-    while white LEDs light all three. White LEDs are blue LEDs with a phosphor
-    coat, so their spill still peaks in blue. What sets them apart from a real
-    blue LED is red: a blue LED added 1% as much red as blue in both recorded
-    runs, and a white one 22-56%. On camera, green LEDs spill cyan-ish light that
-    peaks in green. Only red, green, blue and white have been seen on camera; the
-    yellow and orange cut-offs are guesses.
+    Measured SPILL_BAND pitches from the core. Single-colour LEDs give almost
+    nothing in the channel opposite their own. White LEDs are blue LEDs with a
+    phosphor coat, so their spill still peaks in blue. In seven recorded runs a
+    blue LED added 0-0.1% as much red as blue, and a white one 3.5-54% (the camera
+    darkening its exposure for the white LED can hide most of its red). White
+    also adds more green: 47-79% as much as blue, where a blue LED added 10-29%
+    in a lit room but 61% in a dim one. So white needs some red and plenty of
+    green; blue needs no red; anything else is "unknown" rather than a guess. On
+    camera, green LEDs spill cyan-ish light that peaks in green. Only red, green,
+    blue and white have been seen on camera; the yellow and orange cut-offs are
+    guesses.
     """
     r, g, b = (float(v) for v in increase)
     top = max(r, g, b)
     if top < 1.0:
         return "unknown"
     if top == b:
-        return "white" if r / b >= 0.1 else "blue"
+        if r / b <= 0.01:
+            return "blue"
+        return "white" if r / b >= 0.02 and g / b >= 0.42 else "unknown"
     if top == g:
         return "white" if min(r, b) / g >= 0.5 else "green"
     if min(g, b) / r >= 0.5:
@@ -152,9 +193,22 @@ def glow_colour(increase: np.ndarray) -> str:
     return "orange" if g / r > 0.45 else "red"
 
 
-def find_glow(pin: int, on: np.ndarray, off: np.ndarray, rect: Rectification) -> Glow:
-    """Compare RGB frames taken with the pin on and off, from the same viewpoint."""
+def find_glow(
+    pin: int,
+    on: np.ndarray,
+    off: np.ndarray,
+    rect: Rectification,
+    seen: np.ndarray | None = None,
+) -> Glow:
+    """Compare RGB frames taken with the pin on and off, lined up on the board.
+
+    seen, if given, is 1 where both photos actually showed the board. A photo
+    warped into line is black where it saw nothing, and black would read as
+    "dark before" next to anything bright.
+    """
     inside = board_mask(on.shape, rect)
+    if seen is not None:
+        inside &= seen
     pitch = photo_pitch(rect)
     core = (
         (on.min(axis=2) >= SATURATED) & (off.min(axis=2) < WAS_BELOW) & (inside > 0)
@@ -164,7 +218,10 @@ def find_glow(pin: int, on: np.ndarray, off: np.ndarray, rect: Rectification) ->
     cores = [i + 1 for i in np.argsort(-areas) if areas[i] >= MIN_CORE_PITCH2 * pitch**2]
 
     if not cores:
-        on_v, off_v = on.max(axis=2).astype(np.int16), off.max(axis=2).astype(np.int16)
+        on_v, off_v = (
+            cv2.GaussianBlur(im.max(axis=2).astype(np.float32), (0, 0), pitch)
+            for im in (on, off)
+        )
         if np.abs(on_v - off_v)[inside > 0].mean() >= SPILL_LEVELS:
             return Glow(pin, "unclear", "the board brightened, but no LED core showed")
         return Glow(pin, "dark")
@@ -182,17 +239,22 @@ def find_glow(pin: int, on: np.ndarray, off: np.ndarray, rect: Rectification) ->
     if far:
         return Glow(pin, "unclear", "light appeared in two places", core_px=size)
 
-    blob = (labels == main).astype(np.uint8)
-    outer = cv2.dilate(blob, np.ones((2 * RING_PX + 1,) * 2, np.uint8))
-    near = cv2.dilate(blob, np.ones((9, 9), np.uint8))
-    ring = (outer > 0) & (near == 0) & (inside > 0)
-    increase = np.clip(on.astype(np.int16) - off.astype(np.int16), 0, None)[ring]
+    away = cv2.distanceTransform((labels != main).astype(np.uint8), cv2.DIST_L2, 5)
+    near, far_edge = (d * pitch for d in SPILL_BAND)
+    band = (away > near) & (away <= far_edge) & (inside > 0)
+    band &= on.min(axis=2) < SATURATED
+    increase = np.clip(on.astype(np.int16) - off.astype(np.int16), 0, None)[band]
+    spill = increase.mean(axis=0) if len(increase) else np.zeros(3)
+    if spill.max() < MIN_SPILL:
+        return Glow(
+            pin, "unclear", "a white spot appeared with no glow around it", core_px=size
+        )
     return Glow(
         pin,
         "lit",
         hole=rect.hole_at((x, y)),
         photo_xy=(x, y),
-        colour=glow_colour(increase.mean(axis=0)) if len(increase) else "unknown",
+        colour=glow_colour(spill),
         core_px=size,
     )
 
@@ -275,9 +337,10 @@ class Session:
 
     rect is the board fit used for every frame. It is None when no frame gave a
     usable fit, and then nothing else is judged. glows holds a result for every
-    pin that was judged. moved holds pins not judged because the camera moved.
-    shorted holds pins that did not go high when switched on, and so were
-    switched straight back off.
+    pin that was judged. moved holds pins not judged because their photos could
+    not be lined up: the board or camera moved too much, or too fast. shorted
+    holds pins that did not go high when switched on, and so were switched
+    straight back off.
     """
 
     rect: Rectification | None
@@ -286,13 +349,156 @@ class Session:
     shorted: frozenset[int] = frozenset()
 
 
-def frame_shift(a: np.ndarray, b: np.ndarray) -> float:
-    """How far, in pixels, the camera moved between two RGB frames."""
-    ga = cv2.cvtColor(a, cv2.COLOR_RGB2GRAY).astype(np.float32)
-    gb = cv2.cvtColor(b, cv2.COLOR_RGB2GRAY).astype(np.float32)
-    window = cv2.createHanningWindow((ga.shape[1], ga.shape[0]), cv2.CV_32F)
-    (dx, dy), _ = cv2.phaseCorrelate(ga, gb, window)
-    return float(np.hypot(dx, dy))
+def _small_grey(image: np.ndarray) -> np.ndarray:
+    grey = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    return cv2.resize(
+        grey, None, fx=ALIGN_SCALE, fy=ALIGN_SCALE, interpolation=cv2.INTER_AREA
+    )
+
+
+def _detail(grey: np.ndarray, pitch: float) -> np.ndarray:
+    """The board's fine detail (holes, wire edges), without smooth light.
+
+    A glow, the camera's exposure and the board tilting under a lamp all change
+    the light smoothly and multiplicatively. On a log scale that is a smooth
+    offset, which subtracting a blur of about a hole pitch removes.
+    """
+    log = np.log1p(grey)
+    return log - cv2.GaussianBlur(log, (0, 0), pitch * ALIGN_SCALE)
+
+
+def _shrink(mask: np.ndarray, like: np.ndarray) -> np.ndarray:
+    return cv2.resize(
+        mask, (like.shape[1], like.shape[0]), interpolation=cv2.INTER_NEAREST
+    )
+
+
+def _shift(fixed: np.ndarray, moving: np.ndarray) -> np.ndarray:
+    """A rough start: the translation that best lines moving up with fixed."""
+    window = cv2.createHanningWindow((fixed.shape[1], fixed.shape[0]), cv2.CV_32F)
+    (dx, dy), _ = cv2.phaseCorrelate(fixed, moving, window)
+    return np.array([[1, 0, dx], [0, 1, dy], [0, 0, 1]], np.float32)
+
+
+def _refine(
+    fixed: np.ndarray, moving: np.ndarray, mask: np.ndarray, model: int, start: np.ndarray
+) -> tuple[np.ndarray, float] | None:
+    """Enhanced-correlation alignment at ALIGN_SCALE. Returns the warp from
+    fixed's pixels to moving's, full size, and how well they then match (0-1).
+    None if it diverged."""
+    rows = 3 if model == cv2.MOTION_HOMOGRAPHY else 2
+    try:
+        match, warp = cv2.findTransformECC(
+            fixed, moving, start[:rows].copy(), model, ALIGN_STOP, mask, 5
+        )
+    except cv2.error:
+        return None
+    full = np.vstack([warp, [0, 0, 1]]) if rows == 2 else warp
+    scale = np.diag([ALIGN_SCALE, ALIGN_SCALE, 1.0])
+    return np.linalg.inv(scale) @ full.astype(np.float64) @ scale, float(match)
+
+
+def _corners(rect: Rectification, warp: np.ndarray | None = None) -> np.ndarray:
+    """The board's four corners in the fitted photo, or where warp takes them."""
+    w, h = CANONICAL_SIZE
+    square = np.array([[[0, 0], [w, 0], [w, h], [0, h]]], dtype=np.float64)
+    photo = cv2.perspectiveTransform(square, np.linalg.inv(rect.photo_to_canonical))
+    return photo[0] if warp is None else cv2.perspectiveTransform(photo, warp)[0]
+
+
+def _farthest(a: np.ndarray, b: np.ndarray) -> float:
+    return float(np.hypot(*(a - b).T).max())
+
+
+def align_off(
+    off: np.ndarray, fitted: np.ndarray, rect: Rectification
+) -> np.ndarray | None:
+    """The warp taking each pixel of the fitted photo to the same point of the
+    board in off, a photo with every pin off. None if they cannot be lined up.
+
+    Both photos are unlit, so the whole board's brightness can be used to line
+    them up. (Its fine detail is less reliable here: a shaking hand blurs each
+    averaged photo differently.)
+    """
+    pitch = photo_pitch(rect)
+    fixed, moving = _small_grey(fitted), _small_grey(off)
+    mask = _shrink(board_mask(fitted.shape, rect), fixed)
+    found = _refine(fixed, moving, mask, cv2.MOTION_HOMOGRAPHY, _shift(fixed, moving))
+    if found is None or found[1] < MIN_ALIGN_MATCH:
+        return None
+    warp = found[0]
+    if _farthest(_corners(rect, warp), _corners(rect)) > MAX_DRIFT_PITCHES * pitch:
+        return None
+    return warp
+
+
+def align_on(
+    on: np.ndarray, off: np.ndarray, off_warp: np.ndarray, rect: Rectification
+) -> np.ndarray | None:
+    """The warp from the fitted photo to on, a photo with one pin on, found via
+    off, the same pin's photo with it off. off_warp is align_off's for off.
+
+    Lined up on fine detail, which the LED's smooth glow barely touches. Its
+    saturated centre has no detail at all, and its edge would look like movement,
+    so pixels saturated in either photo are left out. Only a shift is allowed:
+    in the 0.6 s between the photos a hand slides the board rather than turning
+    it, and a freer warp could bend the photo to fit a glow that floods the
+    board. How well the two then match says little, since a glow over most of
+    the board dims the detail it does not hide. So the check is that the board
+    moved no more than a hand can in that time.
+    """
+    pitch = photo_pitch(rect)
+    grey_fixed, grey_moving = _small_grey(off), _small_grey(on)
+    fixed, moving = _detail(grey_fixed, pitch), _detail(grey_moving, pitch)
+    start = _shift(grey_fixed, grey_moving)
+    size = (fixed.shape[1], fixed.shape[0])
+    board = cv2.warpPerspective(
+        board_mask(off.shape, rect), off_warp, (off.shape[1], off.shape[0])
+    )
+    board = _shrink(board, fixed)
+    lit = (
+        cv2.warpPerspective(grey_moving, start, size, flags=cv2.WARP_INVERSE_MAP)
+        >= SATURATED
+    )
+    white = (grey_fixed >= SATURATED) | lit
+    white = cv2.dilate(
+        white.astype(np.uint8), np.ones((int(2 * pitch * ALIGN_SCALE) | 1,) * 2, np.uint8)
+    )
+    keep = board & (1 - white)
+    if keep.sum() < MIN_ALIGN_SHARE * max(int(board.sum()), 1):
+        return None
+    found = _refine(fixed, moving, keep, cv2.MOTION_TRANSLATION, start)
+    if found is None:
+        return None
+    slide, rough = found[0][:2, 2], start[:2, 2] / ALIGN_SCALE
+    if np.hypot(*(slide - rough)) > MAX_DISAGREE_PITCHES * pitch:
+        return None
+    on_warp = found[0] @ off_warp
+    if (
+        _farthest(_corners(rect, on_warp), _corners(rect, off_warp))
+        > MAX_STEP_PITCHES * pitch
+    ):
+        return None
+    return on_warp
+
+
+def seen_by(warp: np.ndarray, image: np.ndarray, like: np.ndarray) -> np.ndarray:
+    """1 where warp_onto(image, warp, like) shows part of image, not the black
+    fill beyond its edge. A 2 px border is dropped, where the fill blends in."""
+    ones = np.ones(image.shape[:2], np.uint8)
+    size = (like.shape[1], like.shape[0])
+    mask = cv2.warpPerspective(
+        ones, warp, size, flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP
+    )
+    return cv2.erode(mask, np.ones((5, 5), np.uint8))
+
+
+def warp_onto(image: np.ndarray, warp: np.ndarray, like: np.ndarray) -> np.ndarray:
+    """image as seen from the photo that like is, given the warp from align_*."""
+    size = (like.shape[1], like.shape[0])
+    return cv2.warpPerspective(
+        image, warp, size, flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP
+    )
 
 
 def analyse(
@@ -305,37 +511,39 @@ def analyse(
     frames holds RGB frames: "base" with every pin off, then "pin<N>_on" and
     "pin<N>_off" for each pin that was photographed, in the order of pins.
 
-    The camera is assumed still, so one board fit serves every frame, and a
-    fixed camera needs only one frame that fits. Movement is checked against the
-    frame the fit came from, using only frames with every pin off, since a lit
-    LED's glow disturbs the shift estimate. Each on-frame sits between two such
-    frames: the base or the previous pin's off-frame, and its own off-frame. If
-    either of those moved, the pin is set aside rather than misread.
+    The board is fitted once, on the first frame that fits (a lit LED can spoil
+    the fit, so unlit frames go first). Every other photo is lined up with that
+    one on the board itself, so the board or camera may drift during the run. A
+    pin whose photos cannot be lined up is set aside rather than misread.
     """
     order = ["base"] + [f"pin{p}_off" for p in pins] + [f"pin{p}_on" for p in pins]
-    rect, fitted_on = None, None
+    rect, fitted = None, None
     for name in order:
         if name in frames:
             candidate = rectify(frames[name])
             if candidate is not None and candidate.ok:
-                rect, fitted_on = candidate, frames[name]
+                rect, fitted = candidate, frames[name]
                 break
-    if rect is None or fitted_on is None:
+    if rect is None or fitted is None:
         return Session(rect=None, shorted=frozenset(shorted))
-
-    def still(name: str) -> bool:
-        return frame_shift(fitted_on, frames[name]) <= MAX_SHIFT_PX
 
     glows: dict[int, Glow] = {}
     moved: set[int] = set()
-    before = "base"
     for pin in pins:
-        on, off = f"pin{pin}_on", f"pin{pin}_off"
-        if on not in frames or off not in frames:
+        on, off = frames.get(f"pin{pin}_on"), frames.get(f"pin{pin}_off")
+        if on is None or off is None:
             continue
-        if not (still(before) and still(off)):
+        off_warp = align_off(off, fitted, rect)
+        on_warp = None if off_warp is None else align_on(on, off, off_warp, rect)
+        if off_warp is None or on_warp is None:
             moved.add(pin)
-        else:
-            glows[pin] = find_glow(pin, frames[on], frames[off], rect)
-        before = off
+            continue
+        seen = seen_by(on_warp, on, fitted) & seen_by(off_warp, off, fitted)
+        glows[pin] = find_glow(
+            pin,
+            warp_onto(on, on_warp, fitted),
+            warp_onto(off, off_warp, fitted),
+            rect,
+            seen,
+        )
     return Session(rect, glows, frozenset(moved), frozenset(shorted))

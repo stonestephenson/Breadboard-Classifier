@@ -6,6 +6,9 @@ The behaviours that matter:
 - Nothing else counts as a lit LED. When the evidence is not a single clean LED,
   the answer is "unclear", never a guess. "Dark" claims a broken branch, so it
   is only given when the board barely changed.
+- A board that drifts, held in a hand, is lined up before photos are compared,
+  and an LED's glow does not drag that alignment. Photos that cannot be lined
+  up are not judged.
 - The board is left safe: every pin low however the run ends, and a pin tied to
   ground is released at once.
 - Real recorded runs give the answer we saw with our own eyes.
@@ -23,7 +26,15 @@ import cv2
 import numpy as np
 import pytest
 
-from breadboard.blink import analyse, find_glow, glow_colour, run_sequence
+import breadboard.blink
+from breadboard.blink import (
+    align_off,
+    align_on,
+    analyse,
+    find_glow,
+    glow_colour,
+    run_sequence,
+)
 from breadboard.rectify import CANONICAL_SIZE, Rectification, template_holes
 
 W, H = CANONICAL_SIZE
@@ -43,8 +54,11 @@ def _board(shape=(H, W), level=(150, 140, 125)) -> np.ndarray:
     return np.full((*shape, 3), level, np.uint8)
 
 
-def _light(image: np.ndarray, xy, spill_rgb, core_radius=10, spill_radius=45):
-    """Add an LED as the camera sees it: a coloured spill, then a white core."""
+def _light(image: np.ndarray, xy, spill_rgb, core_radius=10, spill_radius=130):
+    """Add an LED as the camera sees it: a coloured spill, then a white core.
+
+    Real spills reach well past the 1.5-3 pitches where colour is read.
+    """
     out = image.astype(np.int16)
     yy, xx = np.mgrid[: image.shape[0], : image.shape[1]]
     d = np.hypot(xx - xy[0], yy - xy[1])
@@ -61,7 +75,7 @@ HOLES = template_holes()
 class TestFindGlow:
     def test_a_lit_led_is_found_at_its_column_and_named_by_colour(self):
         off = _board()
-        on = _light(off, HOLES["c30"], spill_rgb=(0, 90, 60))
+        on = _light(off, HOLES["c30"], spill_rgb=(0, 200, 120))
         glow = find_glow(2, on, off, FLAT)
         assert glow.status == "lit"
         assert glow.column == 30
@@ -104,7 +118,7 @@ class TestFindGlow:
         # must not be reported as a broken branch.
         off = _board()
         on = _light(
-            off, HOLES["c30"], spill_rgb=(0, 90, 60), core_radius=0, spill_radius=300
+            off, HOLES["c30"], spill_rgb=(0, 200, 120), core_radius=0, spill_radius=300
         )
         assert find_glow(2, on, off, FLAT).status == "unclear"
 
@@ -112,36 +126,213 @@ class TestFindGlow:
         # Two LEDs on one pin, or a reflection as bright as the LED: reporting
         # one of them would silently drop the other.
         off = _board()
-        on = _light(off, HOLES["c30"], spill_rgb=(0, 90, 60))
+        on = _light(off, HOLES["c30"], spill_rgb=(0, 200, 120))
         on = _light(on, HOLES["c15"], spill_rgb=(90, 20, 10))
         glow = find_glow(2, on, off, FLAT)
         assert glow.status == "unclear"
         assert "two places" in (glow.note or "")
 
+    def test_a_white_spot_with_no_glow_is_a_glint_not_an_led(self):
+        # A tilting board catches the light on a lead or a lens: saturated, and
+        # big enough to pass for a core, but it lights nothing around it.
+        off = _board()
+        on = off.copy()
+        x, y = HOLES["c30"]
+        cv2.circle(on, (round(x), round(y)), 10, (255, 255, 255), -1)
+        glow = find_glow(2, on, off, FLAT)
+        assert glow.status == "unclear"
+        assert "no glow" in (glow.note or "")
+
 
 class TestGlowColour:
-    # The mean spill increase measured around each LED in the two real runs: a
-    # dim room filmed from low, then a lit room filmed from above. These are the
-    # measurements the thresholds were set from, so this guards against
-    # regressions; it does not prove the thresholds generalise.
+    # The mean spill increase 1.5-3 pitches from each LED in five real runs: a
+    # dim room, two lit rooms, and two with the board held up to the camera.
+    # These are the measurements the thresholds were set from, so this guards
+    # against regressions; it does not prove the thresholds generalise. The
+    # third white (7, 88, 187) is the closest call: 3.7% red, against 2% to be
+    # called white and 1% to be called blue.
     @pytest.mark.parametrize(
         ("increase", "name"),
         [
-            ((3, 181, 127), "green"),
-            ((2, 144, 196), "blue"),
-            ((117, 168, 209), "white"),
-            ((168, 58, 31), "red"),
-            ((5, 183, 154), "green"),
-            ((2, 141, 216), "blue"),
-            ((47, 136, 216), "white"),
-            ((143, 19, 7), "red"),
+            ((1, 183, 100), "green"),
+            ((0, 120, 196), "blue"),
+            ((109, 164, 209), "white"),
+            ((167, 14, 6), "red"),
+            ((0, 175, 68), "green"),
+            ((0, 57, 210), "blue"),
+            ((19, 104, 201), "white"),
+            ((142, 0, 0), "red"),
+            ((0, 178, 70), "green"),
+            ((0, 55, 206), "blue"),
+            ((7, 88, 187), "white"),
+            ((136, 0, 0), "red"),
+            ((1, 158, 14), "green"),
+            ((0, 16, 168), "blue"),
+            ((75, 108, 145), "white"),
+            ((141, 6, 0), "red"),
+            ((1, 158, 17), "green"),
+            ((0, 28, 171), "blue"),
+            ((83, 107, 152), "white"),
+            ((146, 9, 0), "red"),
         ],
     )
     def test_measured_spills_get_their_led_colour(self, increase, name):
         assert glow_colour(np.array(increase)) == name
 
+    @pytest.mark.parametrize(
+        "increase",
+        [
+            (10, 50, 200),  # some red, but not the green a white LED adds
+            (3, 100, 200),  # too much red for blue, too little for white
+        ],
+    )
+    def test_between_blue_and_white_it_does_not_guess(self, increase):
+        assert glow_colour(np.array(increase)) == "unknown"
+
     def test_no_spill_has_no_colour(self):
         assert glow_colour(np.zeros(3)) == "unknown"
+
+
+# A photo with a margin around the board, so it can drift without leaving the
+# frame. The board sits MARGIN pixels in from the photo's corner.
+MARGIN = 100
+PLACED = Rectification(
+    photo_to_canonical=np.array([[1, 0, -MARGIN], [0, 1, -MARGIN], [0, 0, 1]], float),
+    canonical=np.zeros((H, W, 3), np.uint8),
+    confidence=1.0,
+    oriented=True,
+    column_margin=0.05,
+)
+
+
+def _held_board() -> np.ndarray:
+    """A board photo with the detail alignment works from: every hole, and a few
+    wires, so the pattern is not purely a repeating grid. Seeded."""
+    rng = np.random.default_rng(0)
+    image = _board((H + 2 * MARGIN, W + 2 * MARGIN), level=(90, 80, 70))
+    cv2.rectangle(image, (MARGIN, MARGIN), (MARGIN + W, MARGIN + H), (150, 140, 125), -1)
+    for x, y in HOLES.values():
+        cv2.circle(image, (round(x) + MARGIN, round(y) + MARGIN), 3, (60, 55, 50), -1)
+    for _ in range(12):
+        a, b = rng.uniform((MARGIN, MARGIN), (MARGIN + W, MARGIN + H), (2, 2))
+        colour = tuple(int(c) for c in rng.integers(0, 255, 3))
+        cv2.line(image, tuple(a.astype(int)), tuple(b.astype(int)), colour, 3)
+    return cv2.GaussianBlur(image, (0, 0), 1.0)
+
+
+def _moved(image: np.ndarray, dx: float, dy: float) -> np.ndarray:
+    """The same photo with the board slid by (dx, dy) pixels."""
+    shift = np.array([[1, 0, dx], [0, 1, dy]], np.float32)
+    return cv2.warpAffine(image, shift, (image.shape[1], image.shape[0]))
+
+
+def _where(warp: np.ndarray, xy) -> np.ndarray:
+    return cv2.perspectiveTransform(np.array([[xy]], float), warp)[0, 0]
+
+
+def _placed(hole: str) -> tuple[int, int]:
+    x, y = HOLES[hole]
+    return round(x) + MARGIN, round(y) + MARGIN
+
+
+class TestAlignment:
+    def test_a_drifting_board_is_lined_up(self):
+        fitted = _held_board()
+        off = _moved(fitted, 17, -9)
+        warp = align_off(off, fitted, PLACED)
+        assert warp is not None
+        for xy in [(200, 200), (1000, 400)]:
+            assert np.allclose(_where(warp, xy), np.add(xy, (17, -9)), atol=0.5)
+
+    def test_a_glow_does_not_drag_the_alignment(self):
+        # A white LED can flood half the board. Lining up on brightness, the
+        # alignment bent the photo thousands of pixels to explain it away.
+        fitted = _held_board()
+        off = _moved(fitted, 17, -9)
+        on = _moved(fitted, 22, -6)
+        on = _light(on, _placed("c30"), (120, 160, 200), core_radius=40, spill_radius=400)
+        off_warp = align_off(off, fitted, PLACED)
+        assert off_warp is not None
+        warp = align_on(on, off, off_warp, PLACED)
+        assert warp is not None
+        for xy in [(200, 200), (1000, 400)]:
+            assert np.allclose(_where(warp, xy), np.add(xy, (22, -6)), atol=0.5)
+
+    def test_too_far_to_trust_is_not_lined_up(self):
+        fitted = _held_board()
+        assert align_off(_moved(fitted, 6 * 16, 0), fitted, PLACED) is None
+
+    def test_a_jump_between_on_and_off_is_not_lined_up(self):
+        # 0.6 s apart, a hand moved the board 0.4 pitch at most. A jump of most
+        # of a hole is too fast to trust, and close to where a repeating grid of
+        # holes could line up one hole over.
+        fitted = _held_board()
+        off = _moved(fitted, 17, -9)
+        on = _moved(fitted, 17 + 13, -9)
+        off_warp = align_off(off, fitted, PLACED)
+        assert off_warp is not None
+        assert align_on(on, off, off_warp, PLACED) is None
+
+    def test_too_little_unlit_board_to_line_up_on_is_not_lined_up(self):
+        fitted = _held_board()
+        off = _moved(fitted, 17, -9)
+        on = off.copy()
+        on[MARGIN : MARGIN + H, MARGIN : MARGIN + int(0.9 * W)] = 255
+        off_warp = align_off(off, fitted, PLACED)
+        assert off_warp is not None
+        assert align_on(on, off, off_warp, PLACED) is None
+
+    def test_a_different_picture_is_not_lined_up(self):
+        fitted = _held_board()
+        other = np.ascontiguousarray(fitted[::-1, ::-1])
+        assert align_off(other, fitted, PLACED) is None
+
+    def test_a_held_board_is_judged_on_the_board(self, monkeypatch):
+        # The board drifts over the run, and more between one pin's photos. The
+        # LED is still found at its own column, and empty pins stay dark.
+        monkeypatch.setattr(breadboard.blink, "rectify", lambda _image: PLACED)
+        fitted = _held_board()
+        frames = {
+            "base": fitted,
+            "pin2_on": _light(
+                _moved(fitted, 9, 4), np.add(_placed("c30"), (9, 4)), (0, 200, 120)
+            ),
+            "pin2_off": _moved(fitted, 12, 2),
+            "pin3_on": _moved(fitted, 14, -3),
+            "pin3_off": _moved(fitted, 11, -5),
+        }
+        session = analyse(frames, [2, 3])
+        assert not session.moved
+        assert session.glows[2].status == "lit"
+        assert session.glows[2].column == 30
+        assert session.glows[3].status == "dark"
+
+    def test_where_a_photo_saw_nothing_does_not_count(self, monkeypatch):
+        # The board fills the photo. Slid left for the off photo, its left end
+        # left the frame, so lined up, that strip is black. Something always
+        # bright there must not read as newly lit.
+        monkeypatch.setattr(breadboard.blink, "rectify", lambda _image: FLAT)
+        fitted = _held_board()[MARGIN : MARGIN + H, MARGIN : MARGIN + W].copy()
+        fitted[150:190, 4:18] = 255
+        frames = {
+            "base": fitted,
+            "pin2_on": _moved(fitted, -2, 0),
+            "pin2_off": _moved(fitted, -10, 0),
+        }
+        session = analyse(frames, [2])
+        assert session.glows[2].status == "dark"
+
+    def test_photos_that_cannot_be_lined_up_are_not_judged(self, monkeypatch):
+        monkeypatch.setattr(breadboard.blink, "rectify", lambda _image: PLACED)
+        fitted = _held_board()
+        frames = {
+            "base": fitted,
+            "pin2_on": _moved(fitted, 9 * 16, 0),
+            "pin2_off": _moved(fitted, 9 * 16, 0),
+        }
+        session = analyse(frames, [2])
+        assert session.moved == {2}
+        assert 2 not in session.glows
 
 
 class FakeBoard:
@@ -241,12 +432,14 @@ class TestRunSequence:
 
 RUNS = Path(__file__).resolve().parent.parent / "data" / "cache" / "blink"
 
-# Two runs of the BasicBoard as rewired by 2026-09-27. First, a dim room filmed
+# Runs of the BasicBoard as rewired by 2026-09-27. First, a dim room filmed
 # from low across the desk. Second, a lit room with the phone higher, the board
-# filling the frame. What lit was checked by eye in the frames: pin 2 green, 3
-# blue, 4 white, 5 red, nothing on the other pins. The glow centres were checked
-# to sit on each LED's body. The columns differ by one between runs because the
-# LED bodies stand above the board and the viewpoint changed.
+# filling the frame. Then two with the phone fixed and the board held up to it
+# in two hands (2026-09-28); it drifted up to 2.3 pitches over each run. What lit
+# was checked by eye in the frames: pin 2 green, 3 blue, 4 white, 5 red, nothing
+# on the other pins. The glow centres were checked to sit on each LED's body.
+# The columns differ by one between runs because the LED bodies stand above the
+# board and the viewpoint changed.
 LEDS = {
     "basicboard-2026-09-27": {
         2: ("green", 30),
@@ -255,6 +448,18 @@ LEDS = {
         5: ("red", 15),
     },
     "basicboard-2026-09-27-overhead": {
+        2: ("green", 29),
+        3: ("blue", 25),
+        4: ("white", 19),
+        5: ("red", 15),
+    },
+    "basicboard-2026-09-28-handheld-1": {
+        2: ("green", 29),
+        3: ("blue", 25),
+        4: ("white", 19),
+        5: ("red", 15),
+    },
+    "basicboard-2026-09-28-handheld-2": {
         2: ("green", 29),
         3: ("blue", 25),
         4: ("white", 19),

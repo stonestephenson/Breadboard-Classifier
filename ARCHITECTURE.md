@@ -212,7 +212,13 @@ Two capabilities this unlocks beyond plain connectivity:
   (`breadboard/blink.py`). On two real runs it found all four BasicBoard LEDs by pin, colour
   and column, and nothing on the other pins. It locates an LED as the core that newly
   saturates to white. The glow's total brightness change is useless for this, because the glow
-  floods half the board and the camera's exposure shifts with it.
+  floods half the board and the camera's exposure shifts with it. *Hand-held (2026-09-28)*: the
+  board held up to a fixed camera drifts over a run, so each photo is lined up on the board
+  before comparing. Lining up on brightness failed: the alignment bent the photo to explain the
+  glow away. Lining up on fine detail (holes, wire edges), which a smooth glow barely touches,
+  and allowing only a slide between a pin's on and off photos, got all four LEDs right on both
+  hand-held runs. Colour is read 1.5-3 pitches out, past where the overloaded sensor bleeds
+  into every channel.
 
 Remaining dependency is no longer firmware but the **web app**: whether our code may send raw
 serial commands through it.

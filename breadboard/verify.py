@@ -232,7 +232,7 @@ def verify(lab: Netlist, session: Session, pins_run: Sequence[int]) -> Verdict:
         if pin in session.shorted:
             findings.append(_tied_to_ground(pin, (), severity="warning"))
         elif pin in session.moved:
-            findings.append(_not_checked(pin, "the camera moved"))
+            findings.append(_not_checked(pin, "its photos could not be lined up"))
         elif glow is not None and glow.status == "unclear":
             findings.append(_not_checked(pin, glow.note or "the picture was unclear"))
         elif glow is not None and glow.status == "lit" and pin not in explained:
@@ -292,7 +292,7 @@ def _judge(
     if pin in session.shorted:
         return _tied_to_ground(pin, (want.component,)), None
     if pin in session.moved:
-        return _not_checked(pin, "the camera moved"), None
+        return _not_checked(pin, "its photos could not be lined up"), None
     glow = session.glows.get(pin)
     if glow is None:
         return _not_checked(pin, "there were no pictures of it"), None
@@ -391,7 +391,8 @@ def _not_checked(pin: int, why: str) -> Finding:
         "not_checked",
         f"I could not check pin {pin}: {why}.",
         severity="uncertain",
-        suggestion="Keep the camera still, in steady light, and check again.",
+        suggestion="Hold the board and the camera as steady as you can, in steady "
+        "light, and check again.",
         detail={"pin": pin},
     )
 

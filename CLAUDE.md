@@ -36,6 +36,7 @@ one laptop, with no trained vision model:
 1. **Emit structured facts from the probe**, so the electrical channel feeds the checker.
 2. ~~Blink and watch~~ — done: `tools/blink.py --camera N`. It needs the board filling most of
    the frame and a lit room. Filmed from low across a dim desk, the board was often not found.
+   The board can be held up to the camera by hand: photos are lined up on the board first.
 3. ~~Check against the lab and explain on the photo~~ — done as `breadboard/verify.py`. It does
    **not** build a full Netlist for `check.py`, because blinking cannot see legs, resistors or
    wires, and inventing them would break the one principle. It is stage A (does it work?) by
