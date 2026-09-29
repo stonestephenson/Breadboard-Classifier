@@ -12,6 +12,9 @@ without them.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import cv2
@@ -140,3 +143,22 @@ class TestPhotos:
         # check on the fit itself.
         for hole in ALL_HOLES:
             assert basicboard.hole_at(basicboard.to_photo(hole)) == hole
+
+
+def test_onnxruntime_telemetry_is_off_before_onnxruntime_loads():
+    # Its upload thread can abort the process at exit. The switch only works if
+    # it is set before onnxruntime is imported, so check in a fresh interpreter.
+    env = {k: v for k, v in os.environ.items() if k != "ORT_DISABLE_TELEMETRY"}
+    probe = (
+        "import sys, breadboard, os\n"
+        "assert 'onnxruntime' not in sys.modules\n"
+        "set_first = os.environ.get('ORT_DISABLE_TELEMETRY')\n"
+        "import breadboard.rectify\n"
+        "assert 'onnxruntime' in sys.modules\n"
+        "print(set_first)\n"
+    )
+    out = subprocess.run(  # noqa: S603 -- this interpreter and a fixed string
+        [sys.executable, "-c", probe], env=env, capture_output=True, text=True
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "1"
