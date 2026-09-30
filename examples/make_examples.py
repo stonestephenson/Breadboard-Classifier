@@ -143,6 +143,20 @@ def basicboard_as_built() -> Netlist:
     return Netlist(name="basicboard (demo board as built 2026-09-29)", components=parts)
 
 
+def basicboard_as_seen() -> Netlist:
+    """The demo board as a camera sees it: every leg in its hole, but not which
+    way round each LED is, which a camera cannot see once it is seated. Each
+    LED's legs are listed left to right (so "anode" means nothing here, and is
+    the short leg on this board); blinking settles which is which."""
+    build = basicboard_as_built()
+    build.name = "basicboard (demo board as a camera sees it 2026-09-29)"
+    for led in build.of_type("led"):
+        legs = sorted(led.pins.values(), key=lambda p: int(p.hole[1:]))
+        led.pins = {"anode": legs[0], "cathode": legs[1]}
+        led.attrs["direction"] = "unknown"
+    return build
+
+
 def led_moved() -> Netlist:
     """One LED leg a single column off -- the commonest real mistake."""
     n = basicboard()
@@ -307,6 +321,7 @@ EXAMPLES = {
     "basicboard_rewired.json": basicboard_rewired,
     "basicboard_demo.json": basicboard_demo,
     "basicboard_as_built.json": basicboard_as_built,
+    "basicboard_as_seen.json": basicboard_as_seen,
     "basicboard_led_moved.json": led_moved,
     "basicboard_led_reversed.json": led_reversed,
     "basicboard_uncertain.json": unsure_reading,

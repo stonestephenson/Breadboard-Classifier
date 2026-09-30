@@ -3,10 +3,13 @@
 The behaviours that matter:
 
 - A description is trusted only where blinking confirms it. Any pin that lit
-  something the description does not predict, or stayed dark when it should
-  have lit, means the description is wrong, and then no fix is shown at all.
-- A backwards LED, or a pin with no LED, is predicted to stay dark. That is what
-  lets a description say "the blue LED is backwards" and be confirmed.
+  something the description does not predict means the description is wrong,
+  and then no fix is shown at all.
+- Darkness contradicts nothing: an LED placed right can stay dark for reasons no
+  picture shows. It gets the hidden causes, one per check, most likely first,
+  and the check after says whether it is fixed.
+- Which way round an LED faces comes from blinking when it lights, whatever the
+  description says. A description may leave it open, as a camera's must.
 - Colours the camera cannot tell apart, and unclear pins, contradict nothing.
 - When the description holds up, the answer names the fix down to the hole.
   "Works" still needs blinking to confirm every LED the lab expects.
@@ -22,12 +25,19 @@ import numpy as np
 import pytest
 
 from breadboard.blink import Glow, Session
-from breadboard.diagnose import MISMATCH_SUMMARY, claims, diagnose, disagreements
+from breadboard.diagnose import (
+    MISMATCH_SUMMARY,
+    Suggested,
+    claims,
+    diagnose,
+    disagreements,
+    remember,
+)
 from breadboard.netlist import Component, Netlist, Pin
 from breadboard.rectify import CANONICAL_SIZE, Rectification
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "examples"))
-from make_examples import basicboard_as_built, basicboard_demo
+from make_examples import basicboard_as_built, basicboard_as_seen, basicboard_demo
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 PINS = tuple(range(2, 11))
@@ -55,6 +65,22 @@ def _built(**changes) -> Netlist:
 
 
 FLIPPED_BLUE = {"LED_blue": {"anode": "d31", "cathode": "d32"}}
+
+
+def _colours_swapped() -> Netlist:
+    """The as-built description with the white and blue LEDs' colours swapped."""
+    build = _built()
+    build["LED_white"].attrs["color"], build["LED_blue"].attrs["color"] = "blue", "white"
+    return build
+
+
+def _kinds(verdict) -> list[str]:
+    return [f.kind for f in verdict.findings]
+
+
+def _hidden(verdict):
+    [found] = [f for f in verdict.findings if f.kind == "hidden_fault"]
+    return found
 
 
 def _run(**pins) -> Session:
@@ -102,16 +128,14 @@ class TestDisagreements:
     def test_a_description_that_matches_the_board_has_none(self):
         assert disagreements(_built(), _run(**AS_BUILT_RUN), PINS) == []
 
-    def test_an_led_described_right_way_round_that_stays_dark_disagrees(self):
-        # The blue LED was flipped on the board, but not in the description.
+    def test_an_led_that_stays_dark_contradicts_nothing(self):
+        # Placed right, it can still be backwards, loose or broken. No picture
+        # shows those, so the description is not wrong.
         run = _run(**{**AS_BUILT_RUN, "p4": "dark"})
-        [found] = disagreements(_built(), run, PINS)
-        assert found.detail["pin"] == 4
-        assert "nothing lit" in found.message
+        assert disagreements(_built(), run, PINS) == []
 
-    def test_an_led_described_backwards_that_lights_disagrees(self):
-        # The description says the blue LED is backwards, but it lit: the
-        # description is wrong, and "turn it around" would be a false accusation.
+    def test_light_where_the_description_says_none_can_come_disagrees(self):
+        # Described backwards, so it cannot light from pin 4, but it did.
         [found] = disagreements(_built(**FLIPPED_BLUE), _run(**AS_BUILT_RUN), PINS)
         assert found.detail["pin"] == 4
 
@@ -156,7 +180,7 @@ class TestDiagnose:
         # Fixes computed from a wrong description would send the student to
         # move a leg that is fine.
         run = _run(**AS_BUILT_RUN)
-        verdict = diagnose(_built(**FLIPPED_BLUE), LAB, run, PINS)
+        verdict = diagnose(_colours_swapped(), LAB, run, PINS)
         assert not verdict.works
         assert verdict.summary == MISMATCH_SUMMARY
         assert {f.kind for f in verdict.findings} == {"entry_mismatch"}
@@ -171,6 +195,118 @@ class TestDiagnose:
         verdict = diagnose(_built(), LAB, Session(None), PINS)
         assert not verdict.works
         assert [f.kind for f in verdict.findings] == ["board_not_found"]
+
+    def test_a_description_contradicted_elsewhere_gets_no_hidden_causes(self):
+        run = _run(**{**AS_BUILT_RUN, "p4": "dark", "p7": ("red", 50)})
+        verdict = diagnose(_built(), LAB, run, PINS)
+        assert verdict.summary == MISMATCH_SUMMARY
+        assert "hidden_fault" not in _kinds(verdict)
+
+
+class TestDirections:
+    """Which way round an LED faces: from blinking when it lights."""
+
+    def test_an_led_that_lights_faces_forwards_whatever_the_file_says(self):
+        # Described backwards, but it lit from its pin: blinking wins, so there
+        # is no "turn it around", and no mismatch either.
+        verdict = diagnose(_built(**FLIPPED_BLUE), LAB, _run(**AS_BUILT_RUN), PINS)
+        assert verdict.works, verdict.findings
+
+    def test_leds_the_file_leaves_open_are_settled_by_blinking(self):
+        verdict = diagnose(basicboard_as_seen(), LAB, _run(**AS_BUILT_RUN), PINS)
+        assert verdict.works, verdict.findings
+        assert any(
+            "which way round the white, blue, green and red LEDs are" in n
+            for n in verdict.notes
+        )
+
+    def test_an_open_led_that_stays_dark_is_never_called_backwards(self):
+        # Nobody saw which way it faces, so the answer cannot say it is wrong.
+        run = _run(**{**AS_BUILT_RUN, "p4": "dark"})
+        verdict = diagnose(basicboard_as_seen(), LAB, run, PINS)
+        assert _kinds(verdict) == ["hidden_fault"]
+        found = _hidden(verdict)
+        assert found.holes == ("d32", "d31")  # the longer leg's hole first
+        assert "longer leg should be in d32, on pin 4's side" in (found.suggestion or "")
+
+    def test_a_wire_off_by_one_is_found_for_an_open_led(self):
+        build = basicboard_as_seen()
+        build["W_blue"].pins["2"] = Pin("a33")
+        run = _run(**{**AS_BUILT_RUN, "p4": "dark"})
+        assert _kinds(diagnose(build, LAB, run, PINS)) == ["wrong_connection"]
+
+
+class TestHiddenCauses:
+    """Placed right, but dark: the next thing to try, one per check."""
+
+    DARK = _run(**{**AS_BUILT_RUN, "p4": "dark"})
+
+    def test_an_led_placed_right_that_stays_dark_gets_the_first_cause(self):
+        verdict = diagnose(_built(), LAB, self.DARK, PINS)
+        assert _kinds(verdict) == ["hidden_fault"]
+        assert verdict.summary == (
+            "Everything looks in the right place, but the blue LED did not light."
+        )
+        found = _hidden(verdict)
+        assert found.severity == "error"
+        assert found.detail == {"pin": 4, "step": 0}
+        assert "wrong way round" in (found.suggestion or "")
+
+    def test_each_check_moves_on_to_the_next_cause_then_stops(self):
+        previous: dict[int, Suggested] = {}
+        said = []
+        for _ in range(5):
+            verdict = diagnose(_built(), LAB, self.DARK, PINS, previous)
+            found = _hidden(verdict)
+            said.append((found.detail["step"], found.suggestion))
+            previous = remember(verdict, LAB, self.DARK, previous)
+        assert [step for step, _ in said] == [0, 1, 2, 3, 3]
+        words = ["turn the LED around", "push it back in", "new one", "teacher"]
+        for (_, suggestion), word in zip(said, words, strict=False):
+            assert word in (suggestion or "")
+
+    def test_an_led_moved_since_starts_again(self):
+        elsewhere = {4: Suggested(4, "hidden_fault", 2, frozenset({"d40", "d41"}))}
+        verdict = diagnose(_built(), LAB, self.DARK, PINS, elsewhere)
+        assert _hidden(verdict).detail["step"] == 0
+
+    def test_after_turning_a_backwards_led_as_told_the_next_cause_follows(self):
+        # Described backwards and dark: turn it around. Turned, but still dark
+        # (a leg is loose too), with the file not edited: the file is out of
+        # date now, so the answer moves on instead of saying turn it again.
+        first = diagnose(_built(**FLIPPED_BLUE), LAB, self.DARK, PINS)
+        assert _kinds(first) == ["reversed_polarity"]
+        previous = remember(first, LAB, self.DARK)
+        again = diagnose(_built(**FLIPPED_BLUE), LAB, self.DARK, PINS, previous)
+        assert _kinds(again) == ["hidden_fault"]
+        assert _hidden(again).detail["step"] == 1
+
+    def test_when_the_led_lights_again_the_answer_says_it_is_fixed(self):
+        previous = remember(diagnose(_built(), LAB, self.DARK, PINS), LAB, self.DARK)
+        verdict = diagnose(_built(), LAB, _run(**AS_BUILT_RUN), PINS, previous)
+        assert verdict.works
+        assert verdict.notes == (
+            "Fixed since the last check: the blue LED lights now. It was most "
+            "likely the wrong way round.",
+        )
+        assert remember(verdict, LAB, _run(**AS_BUILT_RUN), previous) == {}
+
+    def test_any_fix_is_confirmed_when_the_led_lights(self):
+        build = _built()
+        build["W_blue"].pins["2"] = Pin("a33")
+        previous = remember(diagnose(build, LAB, self.DARK, PINS), LAB, self.DARK)
+        verdict = diagnose(_built(), LAB, _run(**AS_BUILT_RUN), PINS, previous)
+        assert verdict.notes == ("Fixed since the last check: the blue LED lights now.",)
+
+    def test_a_pin_that_could_not_be_judged_keeps_its_place(self):
+        previous = remember(diagnose(_built(), LAB, self.DARK, PINS), LAB, self.DARK)
+        blurred = _run(**{**AS_BUILT_RUN, "p4": "unclear"})
+        unclear = diagnose(_built(), LAB, blurred, PINS, previous)
+        previous = remember(unclear, LAB, blurred, previous)
+        lost = Session(None)
+        previous = remember(diagnose(_built(), LAB, lost, PINS), LAB, lost, previous)
+        verdict = diagnose(_built(), LAB, self.DARK, PINS, previous)
+        assert _hidden(verdict).detail["step"] == 1
 
 
 class TestReviewFindings:
@@ -218,6 +354,83 @@ class TestReviewFindings:
         assert {"reversed_polarity", "pin_tied_to_ground"} <= kinds
 
 
+class TestHiddenCausesReview:
+    """Cases a cold review of the hidden causes found wrong (2026-09-29)."""
+
+    DARK = TestHiddenCauses.DARK
+
+    def _two_dark_checks(self) -> dict[int, Suggested]:
+        """What is remembered after "turn it around" and then "push it in"."""
+        previous: dict[int, Suggested] = {}
+        for _ in range(2):
+            verdict = diagnose(_built(), LAB, self.DARK, PINS, previous)
+            previous = remember(verdict, LAB, self.DARK, previous)
+        assert previous[4].step == 1
+        return previous
+
+    def test_a_mismatch_does_not_make_working_leds_look_fixed_later(self):
+        odd = _run(**{**AS_BUILT_RUN, "p7": ("red", 50)})
+        previous = remember(diagnose(_built(), LAB, odd, PINS), LAB, odd)
+        verdict = diagnose(_built(), LAB, _run(**AS_BUILT_RUN), PINS, previous)
+        assert verdict.notes == ()
+
+    def test_a_colour_in_doubt_is_not_later_called_fixed(self):
+        # Red read as orange is a doubt, not a failure.
+        doubt = _run(**{**AS_BUILT_RUN, "p6": ("orange", 44)})
+        previous = remember(diagnose(_built(), LAB, doubt, PINS), LAB, doubt)
+        verdict = diagnose(_built(), LAB, _run(**AS_BUILT_RUN), PINS, previous)
+        assert verdict.notes == ()
+
+    def test_a_typo_in_the_file_does_not_restart_the_causes(self, tmp_path):
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+        from blink import judge
+
+        previous = self._two_dark_checks()
+        broken = tmp_path / "as_built.json"
+        broken.write_text("{")
+        unreadable = judge(LAB, broken, self.DARK, PINS, previous)
+        previous = remember(unreadable, LAB, self.DARK, previous)
+        verdict = diagnose(_built(), LAB, self.DARK, PINS, previous)
+        assert _hidden(verdict).detail["step"] == 2
+
+    def test_a_mismatch_round_does_not_restart_the_causes(self):
+        previous = self._two_dark_checks()
+        odd = _run(**{**AS_BUILT_RUN, "p4": "dark", "p7": ("red", 50)})
+        previous = remember(diagnose(_built(), LAB, odd, PINS), LAB, odd, previous)
+        verdict = diagnose(_built(), LAB, self.DARK, PINS, previous)
+        assert _hidden(verdict).detail["step"] == 2
+
+    def test_no_hidden_cause_beside_a_fix_for_the_same_led(self):
+        # Its short leg skips the resistor: "move this leg" and "placed right,
+        # turn it around" would contradict each other. Placement comes first.
+        verdict = diagnose(_built(LED_blue={"cathode": "h31"}), LAB, self.DARK, PINS)
+        kinds = _kinds(verdict)
+        assert "wrong_connection" in kinds
+        assert "hidden_fault" not in kinds
+        assert "led_does_not_light" not in kinds  # the fix says it better
+
+    def test_a_possible_misplaced_leg_is_not_in_the_right_place(self):
+        run = _run(**{**AS_BUILT_RUN, "p4": "dark", "p5": "unclear"})
+        verdict = diagnose(_built(J_green={"1": "i36"}), LAB, run, PINS)
+        assert "right place" not in verdict.summary
+        assert "hidden_fault" not in _kinds(verdict)
+
+    def test_a_dark_led_placed_right_is_still_said_beside_a_fix_elsewhere(self):
+        # The green wire's fix does not explain why the blue LED is dark.
+        green_off = _run(**{**AS_BUILT_RUN, "p4": "dark", "p5": "dark"})
+        verdict = diagnose(_built(J_green={"1": "i36"}), LAB, green_off, PINS)
+        pins_said = {f.detail.get("pin") for f in verdict.findings}
+        assert 4 in pins_said
+
+    def test_a_warning_elsewhere_is_not_everything_in_the_right_place(self):
+        glows = dict(self.DARK.glows)
+        del glows[7]
+        run = Session(RECT, glows, shorted=frozenset({7}))
+        verdict = diagnose(_built(), LAB, run, PINS)
+        assert "hidden_fault" in _kinds(verdict)
+        assert "right place" not in verdict.summary
+
+
 class TestEditingTheFile:
     def test_a_file_with_a_typo_says_so_instead_of_crashing(self, tmp_path):
         # The file is edited by hand between checks, mid-demo.
@@ -257,10 +470,9 @@ class TestEditingTheFile:
         path = tmp_path / "as_built.json"
         path.write_text(_built().to_json())
         run = _run(**{**AS_BUILT_RUN, "p4": "dark"})
-        assert judge(LAB, path, run, PINS).summary == MISMATCH_SUMMARY
+        assert _kinds(judge(LAB, path, run, PINS)) == ["hidden_fault"]
         path.write_text(_built(**FLIPPED_BLUE).to_json())
-        kinds = [f.kind for f in judge(LAB, path, run, PINS).findings]
-        assert kinds == ["reversed_polarity"]
+        assert _kinds(judge(LAB, path, run, PINS)) == ["reversed_polarity"]
 
 
 RUNS = Path(__file__).resolve().parent.parent / "data" / "cache" / "blink"
@@ -288,16 +500,35 @@ class TestRecordedRun:
         )
         assert verdict.works, verdict.findings
 
-    def test_a_flip_the_description_misses_is_caught_as_a_mismatch(self):
-        # The blue LED turned around on the board, the file not yet edited.
+    def test_a_flip_the_description_misses_gets_the_first_hidden_cause(self):
+        # The blue LED turned around on the board, the file not edited: it is
+        # placed right, so the first thing to try is turning it around.
         session = self._session("basicboard-2026-09-29-demo-flipped-unentered")
         verdict = diagnose(_built(), LAB, session, PINS)
+        errors = [f for f in verdict.findings if f.severity == "error"]
+        assert [(f.kind, f.detail["pin"]) for f in errors] == [("hidden_fault", 4)]
+        assert errors[0].holes == ("d32", "d31")
+
+    def test_colours_entered_wrong_are_caught_as_a_mismatch(self):
+        session = self._session("basicboard-2026-09-29-demo")
+        verdict = diagnose(_colours_swapped(), LAB, session, PINS)
         assert verdict.summary == MISMATCH_SUMMARY
         found = [f.detail["pin"] for f in verdict.findings if f.kind == "entry_mismatch"]
-        assert found == [4]
-        # What blinking itself found is still said; no fix is.
-        assert "led_does_not_light" in [f.kind for f in verdict.findings]
-        assert "reversed_polarity" not in [f.kind for f in verdict.findings]
+        assert found == [3, 4]
+        assert not [f for f in verdict.findings if f.severity == "error"]
+
+    def test_the_board_as_a_camera_sees_it_works_with_directions_from_blinking(self):
+        session = self._session("basicboard-2026-09-29-demo")
+        verdict = diagnose(basicboard_as_seen(), LAB, session, PINS)
+        assert verdict.works, verdict.findings
+        assert any("which way round" in n for n in verdict.notes)
+
+    def test_a_flipped_led_a_camera_cannot_see_gets_turn_it_around(self):
+        session = self._session("basicboard-2026-09-29-demo-flipped")
+        verdict = diagnose(basicboard_as_seen(), LAB, session, PINS)
+        errors = [f for f in verdict.findings if f.severity == "error"]
+        assert [f.kind for f in errors] == ["hidden_fault"]
+        assert "d32" in (errors[0].suggestion or "")
 
     def test_a_flip_the_description_records_gets_the_fix(self):
         # Then the file edited to match: the fix names the blue LED's holes.

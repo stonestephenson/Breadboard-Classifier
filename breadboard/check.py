@@ -472,7 +472,7 @@ def _single_pin_repair(student: Netlist, reference: Netlist) -> Finding | None:
         holes=(pin.hole,),
         scope=_scope(comp),
         suggestion=f"Move it from {pin.hole} to {nice}.",
-        detail={"pin": pin_name, "from": pin.hole, "to": nice},
+        detail={"leg": pin_name, "from": pin.hole, "to": nice},
     )
 
 

@@ -115,6 +115,19 @@ class TestPolarity:
         f = next(f for f in check(student, blink()) if f.kind == "reversed_polarity")
         assert "L1" in f.components
 
+    def test_an_led_whose_way_round_was_not_seen_is_never_called_backwards(self):
+        student = blink()
+        student["L1"].pins = {"anode": Pin("a30"), "cathode": Pin("a20")}
+        student["L1"].attrs["direction"] = "unknown"
+        assert check(student, blink()) == []
+
+    def test_a_wire_off_by_one_is_found_whichever_way_the_led_was_listed(self):
+        # The repair search must not depend on a direction nobody saw.
+        for anode, cathode in (("a21", "a30"), ("a30", "a21")):
+            student = blink(led_from=anode, led_to=cathode)
+            student["L1"].attrs["direction"] = "unknown"
+            assert kinds(check(student, blink())) == ["wrong_connection"]
+
 
 class TestInventory:
     def test_a_missing_part_is_reported(self):

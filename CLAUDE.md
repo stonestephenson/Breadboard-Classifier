@@ -25,7 +25,7 @@ Chrome on school-issued machines).
 | Rectifier (`breadboard/rectify.py`) | **Working on real photos**, and live on a webcam (`tools/live.py`). Built on the vendored breadboard-normalizer. `docs/SPIKE_RECTIFY.md` |
 | Blink and watch (`breadboard/blink.py`, `tools/blink.py`) | **Working on the real board.** Each LED found by its pin, colour and column, no trained model. |
 | Does it work? (`breadboard/verify.py`) | **Working.** Blink results checked against a lab file: findings plus a verdict drawn on the photo. Demo: `tools/live.py --camera 1 --lab examples/basicboard_demo.json`, press `c`. |
-| Which leg to move? (`breadboard/diagnose.py`) | **Working, with the build entered by hand** in place of the vision model: `examples/basicboard_as_built.json`. Trusted only where blinking confirms it; then the checker's fix, down to the hole, is drawn on the photo. Demo: add `--build examples/basicboard_as_built.json`. |
+| Which leg to move? (`breadboard/diagnose.py`) | **Working, with the build entered by hand** in place of the vision model: `examples/basicboard_as_seen.json` (LED directions left open, as a camera must) or `basicboard_as_built.json`. Trusted only where blinking confirms it; then the checker's fix, down to the hole, is drawn on the photo. An LED placed right but dark gets its hidden causes, one per check, and "fixed" when it lights. Demo: add `--build examples/basicboard_as_seen.json`. |
 | Per-node occupancy from photos | Not started; a trained model needs data |
 | Lab reference circuits | BasicBoard and Activity 3 done; others need the curriculum |
 
@@ -51,8 +51,10 @@ one laptop, with no trained vision model:
    For the demo a person describes the build in a circuit file instead
    (`breadboard/diagnose.py`); the model will later produce the same file. The description
    is checked against blinking before any fix is shown. `examples/basicboard_demo.json` is
-   the lab for the user's demo board (rebuilt 2026-09-29), `examples/basicboard_as_built.json`
-   its description; the real curriculum labs come later.
+   the lab for the user's demo board (rebuilt 2026-09-29), `examples/basicboard_as_seen.json`
+   its description as a camera would give it (no LED directions), `basicboard_as_built.json`
+   with them; the real curriculum labs come later. Done for the demo: hidden causes for an LED
+   placed right but dark, directions settled by blinking, and set-aside pins re-checked.
 
 ## The one principle
 

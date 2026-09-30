@@ -81,7 +81,8 @@ class Verdict:
     works is True only when everything was confirmed. ok_pins are the pins whose
     expected LED lit correctly. findings explain everything else, errors before
     doubts. summary is one line to show first. caveat is what a "works" verdict
-    cannot vouch for.
+    cannot vouch for. notes are things worth saying that are not problems, such
+    as what was fixed since the last check (diagnose.py).
     """
 
     works: bool
@@ -89,6 +90,7 @@ class Verdict:
     findings: tuple[Finding, ...] = ()
     ok_pins: tuple[int, ...] = ()
     caveat: str | None = None
+    notes: tuple[str, ...] = ()
 
 
 def expected_leds(lab: Netlist) -> tuple[dict[int, Expected], list[Untestable]]:
@@ -134,6 +136,8 @@ def expected_leds(lab: Netlist) -> tuple[dict[int, Expected], list[Untestable]]:
             fail("it is not wired from a digital pin")
         elif "GND" not in ends[other]:
             fail("it does not return to ground", dark=True)
+        elif leds[0].polarity == 0:
+            fail("which way round it is was not seen")
         elif (leds[0].polarity == 1) != (pin_end == edge.a):
             fail("it faces away from its pin, so it cannot light from it", dark=True)
         elif pin not in OUTPUT_PINS:

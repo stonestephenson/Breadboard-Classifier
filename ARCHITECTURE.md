@@ -281,11 +281,21 @@ valid arrangement is closest to what the student actually built. The edit *is* t
 
 *Demo form (2026-09-29): `breadboard/diagnose.py`.* Until the model exists, a person describes the
 build in a circuit file, the same file the model will produce. That description is inference-grade,
-so it is checked against measurement first: it predicts what each pin lights (colour and column),
-and a backwards LED or empty pin stays dark. If blinking disagrees on any pin, no fix is shown. If
-it agrees, `check.py` names the fix down to the hole, drawn on the photo. The checker compares
+so it is checked against measurement first: it predicts where light can come from (colour and
+column), and that a backwards LED or empty pin lights nothing. If any light disagrees, no fix is
+shown. If not, `check.py` names the fix down to the hole, drawn on the photo. The checker compares
 wires as joins between strips, not parts, so a build that uses jumpers where the lab's drawing
 does not is still the same circuit.
+
+Darkness contradicts nothing, because an LED placed right can stay dark for reasons no picture
+shows. So the answer is in two steps: first, is every part in the right place (the checker)?
+Then, for an LED placed right that stayed dark, the hidden causes, one per check, most likely
+first: it is the wrong way round, a leg is not pushed in, the LED is broken, then "ask your
+teacher". The next check confirms or rules each out, and says "fixed" when the LED lights. Which
+way round an LED faces cannot be seen once it is seated, so the file may leave it open
+(`"direction": "unknown"`; a model's always will). The checker then matches it either way round,
+and blinking settles it: an LED that lights from its pin faces forwards. A pin whose photos could
+not be lined up is blinked again on its own at once, up to twice.
 
 These graphs are tiny — 10–30 typed nodes — so exact computation is instant. This stage is
 **deterministic code, fully unit-testable, with no learned components**, and `mutations.py`

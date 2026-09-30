@@ -4,7 +4,7 @@
     ./venv/bin/python tools/live.py --camera 1   # another camera, e.g. an iPhone
     ./venv/bin/python tools/live.py --list       # which camera numbers work
     ./venv/bin/python tools/live.py --camera 1 --lab examples/basicboard_demo.json
-    ... --build examples/basicboard_as_built.json   # and say which leg to move
+    ... --build examples/basicboard_as_seen.json    # and say which leg to move
 
 Point the camera so the whole board is in view. Every hole is drawn where the
 rectifier thinks it is. Green means the fit is usable; orange means it is not,
@@ -15,12 +15,15 @@ out/live/.
 
 With --lab and the board on USB, c checks the wiring. It blinks each LED in turn
 while you watch (tools/blink.py), then shows what works and what to fix, drawn on
-the picture. With --build, a circuit file describing the board as built (standing in
-for the vision model) is read afresh at each c, and the answer names the fix
-down to the hole when blinking confirms that description (tools/blink.py). Any
-key returns to the live view; c checks again. Each check's
-photos are saved to data/cache/blink/<time>/, so tools/blink.py --replay can
-judge it again.
+the picture. A pin whose photos could not be lined up is blinked again straight
+away, with "hold still" on screen. With --build, a circuit file describing the
+board as built (standing in for the vision model) is read afresh at each c, and
+the answer names the fix down to the hole when blinking confirms that
+description (tools/blink.py). An LED placed right that stays dark gets one thing
+to try per check (turn it around, push it in, a new LED, ask a teacher); the
+check after says whether it is fixed. Any key returns to the live view; c checks
+again. Each check's photos are saved to data/cache/blink/<time>/, so
+tools/blink.py --replay can judge it again.
 
 The rectifier takes about 0.2 s a frame, so it runs in a background thread on
 the newest frame while the video keeps playing. If the board moves, the overlay
@@ -56,6 +59,7 @@ from breadboard.rectify import (
 if TYPE_CHECKING:
     from probe import Board
 
+    from breadboard.diagnose import Suggested
     from breadboard.netlist import Netlist
 
 GOOD = (40, 200, 40)
@@ -213,6 +217,7 @@ class _Watched:
     def __init__(self, board: Board) -> None:
         self.board = board
         self.pin: int | None = None
+        self.doing = "Checking the wiring"
 
     def drive_only(self, pin: int | None) -> int | None:
         level = self.board.drive_only(pin)
@@ -227,8 +232,10 @@ def check_now(
     title: str,
     camera: int,
     build: Path | None = None,
-) -> np.ndarray:
-    """Blink and watch through the live window. Returns the verdict picture, RGB."""
+    previous: dict[int, Suggested] | None = None,
+) -> tuple[np.ndarray, dict[int, Suggested]]:
+    """Blink and watch through the live window. Returns the verdict picture, RGB,
+    and what the next check should know about this one (diagnose.remember)."""
     # Imported here: blink.py imports this module's camera helpers.
     from blink import (
         SAMPLES,
@@ -240,9 +247,11 @@ def check_now(
         save_run,
     )
 
-    from breadboard.blink import OUTPUT_PINS, analyse, run_sequence
+    from breadboard.blink import OUTPUT_PINS, blink_and_watch
+    from breadboard.diagnose import remember
 
     watched = _Watched(board)
+    last: list[np.ndarray] = []  # the newest camera frame, BGR
 
     def show(bgr: np.ndarray, message: str) -> None:
         rgb = _fit_width(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), VIEW_WIDTH)
@@ -254,9 +263,18 @@ def check_now(
         if not ok or bgr is None:
             time.sleep(0.01)
             return None
+        last[:] = [bgr]
         on = f"pin {watched.pin} on" if watched.pin else "all pins off"
-        show(bgr, f"Checking the wiring: {on}")
+        show(bgr, f"{watched.doing}: {on}")
         return bgr
+
+    def say(message: str) -> None:
+        print(message)
+        if last:
+            show(last[0], message)
+
+    def retrying(_pins: tuple[int, ...]) -> None:
+        watched.doing = "Hold still, checking again"
 
     def pump(seconds: float) -> None:
         end = time.monotonic() + seconds
@@ -278,23 +296,24 @@ def check_now(
     board.resync()
     snapshot = board.snapshot()
     try:
-        frames, shorted = run_sequence(watched, OUTPUT_PINS, capture, SETTLE_S, pump)
+        attempts, session = blink_and_watch(
+            watched, OUTPUT_PINS, capture, SETTLE_S, pump, say, retrying=retrying
+        )
     finally:
         with contextlib.suppress(OSError):
             board.resync()  # restore is write-only, so it runs either way
         board.restore(snapshot)
-    show(cv2.cvtColor(frames["base"], cv2.COLOR_RGB2BGR), "Working it out...")
     try:
-        print(f"saved the photos to {save_run(frames, OUTPUT_PINS, shorted, camera)}")
+        print(f"saved the photos to {save_run(attempts, camera)}")
     except OSError as e:  # the check itself went fine; only the copy failed
         print(f"could not save the photos: {e}")
-    session = analyse(frames, OUTPUT_PINS, shorted)
-    result = judge(lab, build, session, OUTPUT_PINS)
+    result = judge(lab, build, session, OUTPUT_PINS, previous)
     note = entered_note(build) if build else None
     print_verdict(result)
     if note:
         print(f"({note})")
-    return draw_verdict(frames["base"], session, result, note)
+    picture = draw_verdict(attempts[0].frames["base"], session, result, note)
+    return picture, remember(result, lab, session, previous) if build else {}
 
 
 def _connect() -> Board:
@@ -345,6 +364,7 @@ def run(
     )
     last_frame = time.monotonic()
     result: np.ndarray | None = None  # the verdict picture, while it is on screen
+    history: dict[int, Suggested] = {}  # what the last check suggested, per pin
     try:
         while True:
             ok, bgr = cap.read()
@@ -370,7 +390,9 @@ def run(
                 try:
                     if board is None:
                         board = _connect()
-                    result = check_now(cap, board, lab, title, index, build)
+                    result, history = check_now(
+                        cap, board, lab, title, index, build, history
+                    )
                 except (OSError, cv2.error) as e:
                     print(f"Could not check: {e}")
                     if board is not None and isinstance(e, OSError):

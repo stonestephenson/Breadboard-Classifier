@@ -52,6 +52,13 @@ COMPONENT_TYPES: dict[str, tuple[tuple[str, ...], bool]] = {
 # labelled vertex.
 TWO_TERMINAL = {t for t, (pins, _) in COMPONENT_TYPES.items() if len(pins) == 2}
 
+# An LED's attrs may say {"direction": "unknown"}: which way round it is was not
+# seen. A camera cannot tell once the LED is seated (its legs are hidden), so a
+# vision model's netlist says this, and its anode and cathode are just its two
+# legs. The checker then matches the LED either way round (graph.py), and
+# blinking settles it when the LED lights (diagnose.py).
+UNKNOWN = "unknown"
+
 
 class NetlistError(ValueError):
     """A netlist that could not exist on a real board."""
@@ -142,10 +149,21 @@ class Component:
         if self.type != "mcu" and set(self.pins) != set(allowed):
             missing = sorted(set(allowed) - set(self.pins))
             raise NetlistError(f"{self.type} {self.id!r} is missing pins {missing}")
+        if "direction" in self.attrs and (
+            self.type != "led" or self.attrs["direction"] != UNKNOWN
+        ):
+            raise NetlistError(
+                f'{self.id!r}: only an LED may have a direction, and only "{UNKNOWN}"'
+            )
 
     @property
     def polarised(self) -> bool:
         return COMPONENT_TYPES[self.type][1]
+
+    @property
+    def direction_known(self) -> bool:
+        """False for an LED whose way round was not seen (see UNKNOWN)."""
+        return self.attrs.get("direction") != UNKNOWN
 
     @property
     def is_two_terminal(self) -> bool:

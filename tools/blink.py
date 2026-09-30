@@ -3,7 +3,7 @@
     ./venv/bin/python tools/blink.py --camera 1       # run it on the board
     ./venv/bin/python tools/blink.py --replay DIR     # re-judge a saved run
     ... --lab examples/basicboard_demo.json           # and check it against a lab
-    ... --build examples/basicboard_as_built.json     # and say which leg to move
+    ... --build examples/basicboard_as_seen.json      # and say which leg to move
 
 Needs the board on USB, a lit room, and a camera that sees the whole board for
 the ~20 s a run takes. The board can be held in a hand: the photos are lined up
@@ -16,10 +16,16 @@ works out what lit.
 With --build, a circuit file describing the board as built stands in for the
 vision model that will one day read it from the photo (breadboard/diagnose.py).
 If blinking confirms the description, the answer names the fix down to the
-hole; if not, it says the description does not match the board.
+hole; if not, it says the description does not match the board. An LED placed
+right that stays dark gets the first thing to try (turn it around); the next
+causes follow on later checks in tools/live.py, which remembers between checks.
+
+A pin whose photos could not be lined up (the board moved) is blinked again on
+its own straight away, up to twice.
 
 It prints one line per pin, and writes:
-  data/cache/blink/<time>/   the frames, so the run can be re-judged (--replay)
+  data/cache/blink/<time>/   the frames, so the run can be re-judged (--replay);
+                             any re-checks in retry1/, retry2/ inside it
   out/blink/<time>.jpg       the photo, each LED circled and labelled
 
 Safety: only the pin under test ever drives; every other pin is disconnected. A
@@ -46,9 +52,15 @@ import numpy as np
 from live import first_frame, open_camera
 from probe import Board, autodetect
 
-from breadboard.blink import OUTPUT_PINS, Session, analyse, run_sequence
+from breadboard.blink import (
+    OUTPUT_PINS,
+    Attempt,
+    Session,
+    analyse_attempts,
+    blink_and_watch,
+)
 from breadboard.check import Finding
-from breadboard.diagnose import diagnose
+from breadboard.diagnose import Suggested, diagnose
 from breadboard.netlist import Netlist, NetlistError
 from breadboard.verify import Verdict, verify
 
@@ -105,8 +117,9 @@ def _exit_on_signal(signum: int, _frame: object) -> None:
     raise SystemExit(128 + signum)
 
 
-def record(camera: int, pins: tuple[int, ...]) -> Path:
-    """Run the blink sequence on the real board and save every frame."""
+def record(camera: int, pins: tuple[int, ...]) -> tuple[Path, Session]:
+    """Run the blink sequence on the real board, save every frame, and return
+    where, with what it showed."""
     for sig in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, _exit_on_signal)
     cap = open_camera(camera)
@@ -124,7 +137,9 @@ def record(camera: int, pins: tuple[int, ...]) -> Path:
             board.resync()
             snapshot = board.snapshot()
             try:
-                frames, shorted = run_sequence(board, pins, grabber.sample, SETTLE_S)
+                attempts, session = blink_and_watch(
+                    board, pins, grabber.sample, SETTLE_S, say=print
+                )
             finally:
                 with contextlib.suppress(OSError):
                     board.resync()  # restore is write-only, so it runs either way
@@ -141,28 +156,31 @@ def record(camera: int, pins: tuple[int, ...]) -> Path:
         if grabber is None or not grabber.is_alive():
             cap.release()
 
-    return save_run(frames, pins, shorted, camera)
+    return save_run(attempts, camera), session
 
 
-def save_run(
-    frames: dict[str, np.ndarray],
-    pins: tuple[int, ...],
-    shorted: list[int],
-    camera: int,
-) -> Path:
-    """Save a run's frames to data/cache/blink/<time>/, for --replay."""
+def save_run(attempts: Sequence[Attempt], camera: int) -> Path:
+    """Save a run's frames to data/cache/blink/<time>/, for --replay. Re-checks
+    of pins set aside go in retry1/, retry2/ inside it."""
     run = SESSIONS / time.strftime("%Y%m%d-%H%M%S")
-    run.mkdir(parents=True, exist_ok=True)
-    for name, frame in frames.items():
-        path = run / f"{name}.png"
-        if not cv2.imwrite(str(path), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)):
-            raise OSError(f"could not write {path}")
-    meta = {"camera": camera, "pins": list(pins), "shorted": shorted}
-    (run / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    for i, attempt in enumerate(attempts):
+        where = run if i == 0 else run / f"retry{i}"
+        where.mkdir(parents=True, exist_ok=True)
+        for name, frame in attempt.frames.items():
+            path = where / f"{name}.png"
+            if not cv2.imwrite(str(path), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)):
+                raise OSError(f"could not write {path}")
+        meta = {
+            "camera": camera,
+            "pins": list(attempt.pins),
+            "shorted": list(attempt.shorted),
+        }
+        (where / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
     return run
 
 
 def load(run: Path) -> tuple[dict[str, np.ndarray], list[int], list[int]]:
+    """The first pass of a saved run: its frames, pins, and pins tied to ground."""
     meta = json.loads((run / "meta.json").read_text())
     frames = {}
     for path in sorted(run.glob("*.png")):
@@ -171,6 +189,18 @@ def load(run: Path) -> tuple[dict[str, np.ndarray], list[int], list[int]]:
             raise OSError(f"cannot read {path}")
         frames[path.stem] = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     return frames, meta["pins"], meta.get("shorted", [])
+
+
+def load_attempts(run: Path) -> list[Attempt]:
+    """A saved run with its re-checks, in order, for analyse_attempts."""
+    attempts = []
+    where, i = run, 0
+    while (where / "meta.json").exists():
+        frames, pins, shorted = load(where)
+        attempts.append(Attempt(frames, tuple(pins), tuple(shorted)))
+        i += 1
+        where = run / f"retry{i}"
+    return attempts
 
 
 def report(session: Session, pins: list[int]) -> list[str]:
@@ -256,7 +286,8 @@ def draw_verdict(
     Green: that pin lit the LED the lab wants. Red: an LED lit on the wrong pin.
     Amber: something doubtful or unexpected. A dark LED cannot be circled; nobody
     knows where it is, unless a finding names its holes (from a described build):
-    those holes are ringed in the finding's colour. note, if given, is the last
+    those holes are ringed in the finding's colour. The verdict's notes (what was
+    fixed since the last check) follow in green. note, if given, is the last
     line of the panel.
     """
     out = photo.copy()
@@ -291,6 +322,9 @@ def draw_verdict(
     if verdict.caveat:
         for part in _wrap(verdict.caveat, width, 0.8 * scale):
             lines.append((part, (200, 200, 200), 0.8))
+    for said in verdict.notes:
+        for part in _wrap(said, width, 0.8 * scale):
+            lines.append((part, VERDICT_COLOURS["ok"], 0.8))
     if note:
         for part in _wrap(note, width, 0.8 * scale):
             lines.append((part, (120, 200, 255), 0.8))
@@ -366,6 +400,8 @@ def print_verdict(verdict: Verdict) -> None:
             print(f"      -> {f.suggestion}")
     if verdict.caveat:
         print(f"  ({verdict.caveat})")
+    for said in verdict.notes:
+        print(f"  {said}")
 
 
 def load_lab(path: Path) -> Netlist:
@@ -381,11 +417,16 @@ def entered_note(build: Path) -> str:
 
 
 def judge(
-    lab: Netlist, build: Path | None, session: Session, pins: Sequence[int]
+    lab: Netlist,
+    build: Path | None,
+    session: Session,
+    pins: Sequence[int],
+    previous: dict[int, Suggested] | None = None,
 ) -> Verdict:
     """The verdict: blinking against the lab, or, given a description of the
     build, the fixes it confirms. The description is read afresh each time, so
-    it can be edited between checks. One that cannot be read is said to be so."""
+    it can be edited between checks. One that cannot be read is said to be so.
+    previous is what the last check left (diagnose.remember), if any."""
     if build is None:
         return verify(lab, session, pins)
     try:
@@ -404,7 +445,7 @@ def judge(
                 ),
             ),
         )
-    return diagnose(described, lab, session, pins)
+    return diagnose(described, lab, session, pins, previous)
 
 
 def main() -> int:
@@ -422,12 +463,19 @@ def main() -> int:
     lab = load_lab(args.lab) if args.lab else None
 
     try:
-        run = args.replay or record(args.camera, OUTPUT_PINS)
+        run, session = (
+            (args.replay, None) if args.replay else record(args.camera, OUTPUT_PINS)
+        )
     except OSError as e:
         print(f"Could not run: {e}")
         return 1
-    frames, pins, shorted = load(run)
-    session = analyse(frames, pins, shorted)
+    attempts = load_attempts(run)
+    if not attempts:
+        print(f"No saved run in {run}")
+        return 1
+    frames, pins = attempts[0].frames, list(attempts[0].pins)
+    if session is None:  # a replay: judge the saved photos
+        session = analyse_attempts(attempts)
     print("\n".join(report(session, pins)))
 
     verdict = judge(lab, args.build, session, pins) if lab is not None else None

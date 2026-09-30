@@ -28,11 +28,18 @@ import pytest
 
 import breadboard.blink
 from breadboard.blink import (
+    MAX_RETRIES,
+    Attempt,
+    Glow,
+    Session,
     align_off,
     align_on,
     analyse,
+    analyse_attempts,
+    blink_and_watch,
     find_glow,
     glow_colour,
+    retried,
     run_sequence,
 )
 from breadboard.rectify import CANONICAL_SIZE, Rectification, template_holes
@@ -581,6 +588,136 @@ class TestRunSequence:
         with pytest.raises(ValueError, match="not output pins"):
             run_sequence(board, [2, 11], _frame, sleep=_no_wait)
         assert board.log == []
+
+
+def _camera(board: FakeBoard, moving: set[int], lit=(2, "c30")):
+    """A camera over a held board: the photos of a pin in moving show the board
+    jumped too far to line up; pin lit[0]'s LED sits at hole lit[1]."""
+    still = _held_board()
+
+    def capture() -> np.ndarray:
+        pin = board.driven
+        if pin is None:
+            return still
+        if pin in moving:
+            return _moved(still, 9 * 16, 0)
+        if pin == lit[0]:
+            return _light(still.copy(), _placed(lit[1]), (0, 200, 120))
+        return still
+
+    return capture
+
+
+class TestRetries:
+    """Pins set aside because the board moved are checked again at once."""
+
+    def test_a_pin_set_aside_is_checked_again_and_judged(self, monkeypatch):
+        monkeypatch.setattr(breadboard.blink, "rectify", lambda _image: PLACED)
+        board = FakeBoard()
+        moving = {2}
+        capture = _camera(board, moving)
+        said = []
+
+        def say(message: str) -> None:
+            said.append(message)
+            moving.clear()  # the person holds still once asked
+
+        attempts, session = blink_and_watch(
+            board, [2, 3], capture, sleep=_no_wait, say=say
+        )
+        assert [a.pins for a in attempts] == [(2, 3), (2,)]
+        assert not session.moved
+        assert session.glows[2].status == "lit"
+        assert session.glows[2].column == 30
+        assert session.glows[3].status == "dark"
+        assert "Pin 2 again: hold still..." in said
+        assert board.driven is None
+
+    def test_retries_stop_and_the_pin_stays_set_aside(self, monkeypatch):
+        monkeypatch.setattr(breadboard.blink, "rectify", lambda _image: PLACED)
+        board = FakeBoard()
+        attempts, session = blink_and_watch(
+            board, [2, 3], _camera(board, {2}), sleep=_no_wait
+        )
+        assert len(attempts) == 1 + MAX_RETRIES
+        assert session.moved == {2}
+        assert board.log.count(2) == 1 + MAX_RETRIES
+
+    def test_no_retry_when_the_board_was_not_found(self, monkeypatch):
+        monkeypatch.setattr(breadboard.blink, "rectify", lambda _image: None)
+        board = FakeBoard()
+        attempts, session = blink_and_watch(
+            board, [2, 3], _camera(board, {2}), sleep=_no_wait
+        )
+        assert len(attempts) == 1
+        assert session.rect is None
+
+    def test_saved_attempts_judge_the_same_again(self, monkeypatch):
+        monkeypatch.setattr(breadboard.blink, "rectify", lambda _image: PLACED)
+        board = FakeBoard()
+        moving = {2}
+        attempts, session = blink_and_watch(
+            board,
+            [2, 3],
+            _camera(board, moving),
+            sleep=_no_wait,
+            say=lambda _m: moving.clear(),
+        )
+        again = analyse_attempts(attempts)
+        assert again.glows == session.glows
+        assert again.moved == session.moved
+
+    def test_a_run_saves_with_its_retries_and_loads_back(self, monkeypatch, tmp_path):
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+        import blink as tool
+
+        monkeypatch.setattr(tool, "SESSIONS", tmp_path)
+        frame = np.full((8, 8, 3), 7, np.uint8)
+        attempts = [
+            Attempt({"base": frame, "pin2_on": frame, "pin2_off": frame}, (2, 3), (3,)),
+            Attempt({"base": frame, "pin2_on": frame, "pin2_off": frame}, (2,)),
+        ]
+        run = tool.save_run(attempts, camera=1)
+        loaded = tool.load_attempts(run)
+        assert [(a.pins, a.shorted, sorted(a.frames)) for a in loaded] == [
+            (a.pins, a.shorted, sorted(a.frames)) for a in attempts
+        ]
+        assert np.array_equal(loaded[1].frames["pin2_on"], frame)
+
+    def test_a_retry_fitted_less_well_than_the_first_run_is_not_trusted(self):
+        # "Works" needs a top-grade fit, and only the first run's is graded.
+        rough = Rectification(
+            photo_to_canonical=PLACED.photo_to_canonical,
+            canonical=PLACED.canonical,
+            confidence=0.75,
+            oriented=True,
+            column_margin=0.05,
+        )
+        first = Session(PLACED, {3: Glow(3, "dark")}, moved=frozenset({2}))
+        glow = Glow(2, "lit", hole="c30", photo_xy=(300.0, 120.0), colour="green")
+        merged = retried(first, Session(rough, {2: glow}))
+        assert merged.moved == {2}
+        assert 2 not in merged.glows
+
+    def test_a_retried_glow_is_drawn_where_it_is_in_the_first_photo(self):
+        # The retry's photo saw the board 50 px further right.
+        shifted = Rectification(
+            photo_to_canonical=np.array(
+                [[1, 0, -MARGIN - 50], [0, 1, -MARGIN], [0, 0, 1]], float
+            ),
+            canonical=PLACED.canonical,
+            confidence=1.0,
+            oriented=True,
+            column_margin=0.05,
+        )
+        first = Session(PLACED, {3: Glow(3, "dark")}, moved=frozenset({2}))
+        glow = Glow(2, "lit", hole="c30", photo_xy=(300.0, 120.0), colour="green")
+        merged = retried(first, Session(shifted, {2: glow}))
+        assert merged.glows[2].photo_xy == pytest.approx((250.0, 120.0))
+        assert merged.glows[2].hole == "c30"
+        assert not merged.moved
 
 
 RUNS = Path(__file__).resolve().parent.parent / "data" / "cache" / "blink"

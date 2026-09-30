@@ -22,7 +22,8 @@ The board may be held in a hand, so it drifts between photos. Before comparing
 them, each photo is warped onto the one the board was fitted on, lining them up
 on the board itself (align). The LED's own glow is left out when lining up a
 photo with the LED on, or the alignment would try to explain the glow as
-movement. A pin whose photos cannot be lined up is not judged.
+movement. A pin whose photos cannot be lined up is set aside, and checked again
+on its own straight after (blink_and_watch), up to MAX_RETRIES times.
 
 When unsure, it says so. Each pin comes out "lit", "dark" or "unclear". Unclear
 means something changed that does not look like a single LED:
@@ -44,7 +45,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal, Protocol
 
 import cv2
@@ -120,6 +121,11 @@ MIN_ALIGN_SHARE = 0.15
 # The pins the shipped LbyM sketch sets up as outputs, and so can light an LED.
 # 11 and 12 are inputs with pull-ups; "switching them off" would disable those.
 OUTPUT_PINS = tuple(range(2, 11))
+
+# How many times pins set aside (their photos could not be lined up) are checked
+# again. Each time takes about two seconds a pin. A board that keeps moving is
+# better told to hold still than retried for ever.
+MAX_RETRIES = 2
 
 Status = Literal["lit", "dark", "unclear"]
 
@@ -700,3 +706,99 @@ def analyse(
                 anchor, (anchor_warp, glows[pin]) = new, done
             i += direction
     return Session(rect, glows, frozenset(moved), frozenset(shorted))
+
+
+@dataclass(frozen=True)
+class Attempt:
+    """One run_sequence: its frames (named as analyse expects), the pins it
+    drove, and the pins that were tied to ground."""
+
+    frames: dict[str, np.ndarray]
+    pins: tuple[int, ...]
+    shorted: tuple[int, ...] = ()
+
+
+def retried(first: Session, again: Session) -> Session:
+    """first, with the pins it set aside judged from a second run of just those.
+
+    The second run is fitted and lined up on its own, so only its judgements
+    carry over, and only if its fit is graded at least as well as the first
+    run's: the verdict grades the first run's fit alone, and "works" needs a top
+    grade. A glow's photo position is moved into the first run's photo, so it
+    can be drawn there. A pin set aside again stays set aside.
+    """
+    if first.rect is None or again.rect is None:
+        return first
+    if again.rect.confidence < first.rect.confidence:
+        return first
+    glows, moved, shorted = dict(first.glows), set(first.moved), set(first.shorted)
+    for pin in first.moved:
+        if pin in again.shorted:
+            shorted.add(pin)
+            moved.discard(pin)
+        elif pin in again.glows:
+            glows[pin] = _into(again.glows[pin], again.rect, first.rect)
+            moved.discard(pin)
+    return Session(first.rect, glows, frozenset(moved), frozenset(shorted))
+
+
+def _into(glow: Glow, source: Rectification, target: Rectification) -> Glow:
+    """The glow as seen in target's photo rather than source's."""
+    if glow.photo_xy is None:
+        return glow
+    to_target = np.linalg.inv(target.photo_to_canonical) @ source.photo_to_canonical
+    point = np.array([[glow.photo_xy]], np.float64)
+    x, y = cv2.perspectiveTransform(point, to_target)[0, 0]
+    return replace(glow, photo_xy=(float(x), float(y)))
+
+
+def analyse_attempts(attempts: Sequence[Attempt]) -> Session:
+    """Judge a run and its retries: each retry fills in pins set aside before."""
+    session = Session(rect=None)
+    for i, attempt in enumerate(attempts):
+        judged = analyse(attempt.frames, attempt.pins, attempt.shorted)
+        session = judged if i == 0 else retried(session, judged)
+    return session
+
+
+def blink_and_watch(
+    board: PinDriver,
+    pins: Sequence[int],
+    capture: Callable[[], np.ndarray],
+    settle_s: float = 0.6,
+    sleep: Callable[[float], None] = time.sleep,
+    say: Callable[[str], None] = lambda _message: None,
+    retries: int = MAX_RETRIES,
+    retrying: Callable[[tuple[int, ...]], None] = lambda _pins: None,
+) -> tuple[list[Attempt], Session]:
+    """Blink every pin, judge the photos, and check set-aside pins again.
+
+    A pin is set aside when its photos cannot be lined up, usually because the
+    board moved while it was lit. Checking it again at once, on its own, costs a
+    couple of seconds and usually gets a clean answer, where otherwise the
+    student would have to run the whole check again. No retry is tried when the
+    board was not found at all: the framing is the problem, and the same
+    framing would fail again. say(message) reports progress to the person
+    holding the board; retrying(pins) is called as a re-check starts. Safety is
+    run_sequence's: all pins are released between runs, and while the photos
+    are judged.
+
+    Returns every run made, so it can be saved and judged again later
+    (analyse_attempts), and the combined result.
+    """
+    frames, shorted = run_sequence(board, pins, capture, settle_s, sleep)
+    attempts = [Attempt(frames, tuple(pins), tuple(shorted))]
+    say("Working it out...")
+    session = analyse(frames, pins, shorted)
+    for _ in range(retries):
+        if session.rect is None or not session.moved:
+            break
+        again = tuple(sorted(session.moved))
+        listed = ", ".join(str(p) for p in again)
+        say(f"Pin{'s' if len(again) > 1 else ''} {listed} again: hold still...")
+        retrying(again)
+        frames, shorted = run_sequence(board, again, capture, settle_s, sleep)
+        attempts.append(Attempt(frames, again, tuple(shorted)))
+        say("Working it out...")
+        session = retried(session, analyse(frames, again, shorted))
+    return attempts, session

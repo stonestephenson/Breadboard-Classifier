@@ -55,7 +55,8 @@ The others are worth running to see the behaviours that matter most:
 | `basicboard_dead_rail.json` | The unpowered half of a split power rail. The kit's own board turned out to have continuous rails (`board.RAILS_SPLIT`), so this only applies to a split-rail board |
 | `basicboard_rewired.json` | Not a mistake: the BasicBoard as rewired on 2026-09-27 (pin 2 green, 3 blue, 4 white, 5 red) |
 | `basicboard_demo.json` | The lab for the live demo board, rebuilt 2026-09-29: pin 3 white, 4 blue, 5 green, 6 red |
-| `basicboard_as_built.json` | That demo board as built, every leg in its hole: the file a vision model will one day produce |
+| `basicboard_as_built.json` | That demo board as built, every leg in its hole, as a person described it |
+| `basicboard_as_seen.json` | The same, but not which way round each LED is, which a camera cannot see: the file a vision model will one day produce |
 
 **Activity 3 (Intro to Sensors)** is the first lab with real wiring, and its answer is fixed by
 the worksheet: the light sensor's + to 3V, − to GND, OUT to A0, with three jumper wires placed
@@ -109,7 +110,8 @@ Plug a Metro Mini in over USB (a **data** cable, not charge-only):
 ```
 
 It switches pins 2-10 on one at a time and finds each LED as the spot that turns white, inside
-the board. It gives which pin drives which LED, its colour, and its column (the row is
+the board. A pin whose photos could not be lined up, because the board moved, is blinked again on
+its own straight away, up to twice. It gives which pin drives which LED, its colour, and its column (the row is
 approximate, because the LED stands above the board). When what it sees is not one clean LED,
 such as a glow with no bright centre or light in two places, it says "unclear" rather than
 guessing. Frame the board large, in a lit room. The board may be held up to the camera in your
@@ -118,12 +120,22 @@ the pin under test is ever driven. Every other pin is disconnected, so pins wire
 cannot fight, and no pin can pose as a ground. A pin tied to ground is released at once. However
 the run ends, the board is handed back as the program set it up.
 
-Add `--build examples/basicboard_as_built.json` (to `tools/blink.py` or `tools/live.py`) to say
+Add `--build examples/basicboard_as_seen.json` (to `tools/blink.py` or `tools/live.py`) to say
 which leg to move. That file describes the board as built, standing in for the vision model that
 will one day read it from the photo; edit it to match the board and check again. It is trusted
-only where blinking confirms it. If it does, the answer names the fix down to the hole ("The blue
-LED is in the wrong way round… at d31, d32"), drawn on the photo. If not, it says the entered
-parts don't match the board, and shows no fix.
+only where blinking confirms it. If light comes from somewhere it does not predict, the answer
+says the entered parts don't match the board, and shows no fix. Otherwise it goes in two steps.
+First, is every part in the right place? If not, the fix down to the hole ("Move it from d33 to
+d32"), drawn on the photo. Then, for an LED placed right that stayed dark, the causes no picture
+shows, one per check, most likely first: it is the wrong way round, a leg is not pushed in, the
+LED is broken, and last, ask your teacher. `tools/live.py` remembers between checks, and says
+"Fixed since the last check" when the LED lights.
+
+A camera cannot see which way round an LED is once it is in the board, so `basicboard_as_seen.json`
+leaves it open (`"direction": "unknown"`): the checker accepts it either way round, and blinking
+settles it, since an LED that lights from its pin must face forwards. `basicboard_as_built.json`
+gives the directions, as a person can: an LED entered backwards that stays dark gets "The blue LED
+is in the wrong way round… at d31, d32".
 
 `--analog` is Activity 3's own acceptance test, measured directly. Continuity cannot see that
 lab at all — a sensor is not a short, so the three jumper wires join nothing a scan detects — but
@@ -174,15 +186,18 @@ with our earlier attempt: [docs/SPIKE_RECTIFY.md](docs/SPIKE_RECTIFY.md).
 |---|---|
 | Circuit model and checker | **Works.** [docs/CHECKER.md](docs/CHECKER.md) |
 | Electrical probe | **Works on real hardware.** [docs/FIRMWARE_PROTOCOL.md](docs/FIRMWARE_PROTOCOL.md) |
-| Rectifying a photo | **Works** on all 13 test photos; live webcam not yet tried. [docs/SPIKE_RECTIFY.md](docs/SPIKE_RECTIFY.md) |
-| Photo → circuit | **Not started.** Needs training data. |
-| Probe → circuit | **Not started.** See below. |
+| Rectifying a photo | **Works** on all 13 test photos, and live on a webcam with the board held in a hand. [docs/SPIKE_RECTIFY.md](docs/SPIKE_RECTIFY.md) |
+| Does it work? (blinking against the lab) | **Works** on the real board, for LED labs. |
+| Which leg to move? | **Works**, from a build described by hand and checked by blinking. |
+| Photo → circuit | **Not started.** Needs training data. A hand-written file stands in for it. |
+| Probe → circuit | **Not started.** Blinking gives per-pin facts instead. |
 | Activity 3 reference circuit | **Done**, from the worksheet. |
 | Activities 1, 4, 5 references | Not authored yet. |
 
-**The two halves do not join up yet.** You can measure a real board, find the board in a photo,
-and check a circuit. But nothing yet turns a photograph or a probe reading into a `Netlist` for
-the checker to consume. Every example in `examples/` is hand-authored.
+**For LED labs the loop is closed, except for one step.** A check blinks each LED, compares what
+lit with the lab, and, given a description of the build, names the leg to move. Only that
+description is still written by hand; nothing yet turns a photograph into a `Netlist`. Every
+example in `examples/` is hand-authored.
 
 What electricity *can* do on its own is answer whether a circuit works: `--sweep` for the LED
 labs, `--analog` for the sensor labs. What it cannot do is say *where* a wire should move, and

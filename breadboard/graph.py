@@ -49,6 +49,8 @@ class Item:
     `polarity` is +1 when the part's first pin faces the edge's `a` end, -1 when
     it faces `b`, and 0 for parts with no orientation. Reversing an edge negates
     it, which is exactly how a backwards LED stays detectable after collapsing.
+    An LED whose way round was not seen (netlist.UNKNOWN) also gets 0, so it
+    matches either way round: nobody can say it is backwards.
     """
 
     type: str
@@ -68,7 +70,9 @@ class Item:
         Attributes are checked only when the reference states them, so an author
         who does not care about colour need not write one.
         """
-        if self.type != ref.type or self.polarity != ref.polarity:
+        if self.type != ref.type:
+            return False
+        if self.polarity and ref.polarity and self.polarity != ref.polarity:
             return False
         mine = dict(self.attrs)
         # A key the reference does not mention is a wildcard, so absent means ok.
@@ -210,7 +214,8 @@ def build(netlist: Netlist) -> CircuitGraph:
 def _item(comp: Component) -> Item:
     keys = SIGNIFICANT_ATTRS.get(comp.type, ())
     attrs = tuple((k, comp.attrs[k]) for k in keys if k in comp.attrs)
-    return Item(comp.type, attrs, 1 if comp.polarised else 0, comp.id)
+    polarity = 1 if comp.polarised and comp.direction_known else 0
+    return Item(comp.type, attrs, polarity, comp.id)
 
 
 def find_isomorphism(

@@ -107,6 +107,31 @@ class TestComponent:
         with pytest.raises(NetlistError, match="D99"):
             Component(id="MCU", type="mcu", pins={"D99": Pin("a10")})
 
+    def test_an_led_may_say_its_way_round_was_not_seen(self):
+        seen = led()
+        unseen = Component(
+            id="LED2",
+            type="led",
+            attrs={"color": "red", "direction": "unknown"},
+            pins={"anode": Pin("b24"), "cathode": Pin("b28")},
+        )
+        assert seen.direction_known and not unseen.direction_known
+
+    @pytest.mark.parametrize(
+        ("ctype", "direction"),
+        [("led", "backwards"), ("led", "unkown"), ("resistor", "unknown")],
+    )
+    def test_a_direction_is_only_ever_unknown_and_only_on_an_led(self, ctype, direction):
+        # A hand-edited file with a typo must not be read as a known direction.
+        names = ("anode", "cathode") if ctype == "led" else ("1", "2")
+        with pytest.raises(NetlistError, match="direction"):
+            Component(
+                id="X",
+                type=ctype,
+                attrs={"direction": direction},
+                pins={names[0]: Pin("b24"), names[1]: Pin("b28")},
+            )
+
 
 class TestNetlist:
     def test_component_ids_must_be_unique(self):

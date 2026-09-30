@@ -116,6 +116,19 @@ class TestEquivalence:
     def test_a_reversed_led_does_not_match(self):
         assert not equivalent(blink_circuit(), blink_circuit(reverse_led=True))
 
+    def test_an_led_whose_way_round_was_not_seen_matches_either_way(self):
+        # A camera cannot see which way an LED faces, so it cannot be wrong.
+        for reverse in (False, True):
+            unseen = blink_circuit(reverse_led=reverse)
+            unseen["C2"].attrs["direction"] = "unknown"
+            assert equivalent(unseen, blink_circuit())
+
+    def test_an_led_whose_way_round_was_not_seen_still_needs_its_place(self):
+        unseen = blink_circuit(gnd_col=31)
+        unseen["C2"].attrs["direction"] = "unknown"
+        unseen["C2"].pins["cathode"] = Pin("a30")  # not in the ground strip
+        assert not equivalent(unseen, blink_circuit())
+
     def test_a_different_mcu_pin_does_not_match(self):
         other = blink_circuit()
         other.components[0] = mcu(D7="a10", GND="a30")
