@@ -10,7 +10,8 @@ Why this and not the full checker (check.py). The checker needs a circuit file
 with every leg in a hole. Blink and watch cannot see legs, resistors or wires,
 so building that file would mean inventing parts nobody saw, which is exactly
 what this project must not do. Where a leg must move (stage B, the minimum
-edit) needs a camera that can see legs; that comes later.
+edit) needs a description of every leg: diagnose.py takes one written by hand,
+standing in for the model that will read it from the photo.
 
 Findings use the checker's Finding type, so callers treat both the same.
 "Everything works" is harder to earn than any single error (CLAUDE.md). It needs
@@ -59,11 +60,18 @@ class Expected:
 
 @dataclass(frozen=True)
 class Untestable:
-    """An LED in the lab that blinking cannot test, and why."""
+    """An LED in the lab that blinking cannot test, and why.
+
+    pin is the digital pin its chain starts from, when it has one. dark is True
+    when, switched on alone, that pin cannot light it: it faces away from the
+    pin, or its path never reaches ground.
+    """
 
     component: str
     colour: str | None
     reason: str
+    pin: int | None = None
+    dark: bool = False
 
 
 @dataclass(frozen=True)
@@ -112,9 +120,10 @@ def expected_leds(lab: Netlist) -> tuple[dict[int, Expected], list[Untestable]]:
         pin = _digital(ends[pin_end]) if pin_end is not None else None
         other = edge.b if pin_end == edge.a else edge.a
 
-        def fail(reason: str, leds=leds) -> None:
+        def fail(reason: str, leds=leds, pin=pin, dark: bool = False) -> None:
             untestable.extend(
-                Untestable(led.component_id, _colour(led.attrs), reason) for led in leds
+                Untestable(led.component_id, _colour(led.attrs), reason, pin, dark)
+                for led in leds
             )
 
         if len(leds) != 1:
@@ -124,9 +133,9 @@ def expected_leds(lab: Netlist) -> tuple[dict[int, Expected], list[Untestable]]:
         elif pin is None or pin_end is None:
             fail("it is not wired from a digital pin")
         elif "GND" not in ends[other]:
-            fail("it does not return to ground")
+            fail("it does not return to ground", dark=True)
         elif (leds[0].polarity == 1) != (pin_end == edge.a):
-            fail("it faces away from its pin, so it cannot light from it")
+            fail("it faces away from its pin, so it cannot light from it", dark=True)
         elif pin not in OUTPUT_PINS:
             fail(f"the board's program cannot switch pin {pin}")
         else:
@@ -141,7 +150,9 @@ def expected_leds(lab: Netlist) -> tuple[dict[int, Expected], list[Untestable]]:
             expected[pin] = wants[0]
         else:
             untestable += [
-                Untestable(w.component, w.colour, f"it shares pin {pin} with another LED")
+                Untestable(
+                    w.component, w.colour, f"it shares pin {pin} with another LED", pin
+                )
                 for w in wants
             ]
     return expected, untestable

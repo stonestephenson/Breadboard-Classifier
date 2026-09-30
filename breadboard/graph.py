@@ -353,8 +353,46 @@ def _partial_ok(
 
 
 def equivalent(student: Netlist, reference: Netlist) -> bool:
-    """True when both netlists describe the same working circuit."""
+    """True when both netlists describe the same working circuit.
+
+    Wires are compared as what they are electrically: joins between strips, not
+    parts. So a build that reaches a pin through a jumper wire equals one that
+    plugs the resistor straight into that pin's strip.
+    """
     return (
-        find_isomorphism(build(student).collapsed(), build(reference).collapsed())
+        find_isomorphism(
+            wires_joined(build(student)).collapsed(),
+            wires_joined(build(reference)).collapsed(),
+        )
         is not None
     )
+
+
+def wires_joined(graph: CircuitGraph) -> CircuitGraph:
+    """The same circuit with every wire replaced by the join it makes: the strips
+    at its two ends become one node, keeping every label either had."""
+    parent: dict[str, str] = {}
+
+    def find(node: str) -> str:
+        parent.setdefault(node, node)
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    for edge in graph.edges:
+        if all(item.type == "wire" for item in edge.items):
+            parent[find(edge.a)] = find(edge.b)
+    labels: dict[str, frozenset[str]] = {}
+    for node, names in graph.labels.items():
+        labels[find(node)] = labels.get(find(node), frozenset()) | names
+    edges = [
+        Edge(find(e.a), find(e.b), e.items)
+        for e in graph.edges
+        if not all(item.type == "wire" for item in e.items)
+    ]
+    parts = [
+        Part(p.id, p.type, p.attrs, tuple((n, find(node)) for n, node in p.pins))
+        for p in graph.parts
+    ]
+    return CircuitGraph(labels=labels, edges=edges, parts=parts)

@@ -3,7 +3,8 @@
     ./venv/bin/python tools/live.py              # the default camera
     ./venv/bin/python tools/live.py --camera 1   # another camera, e.g. an iPhone
     ./venv/bin/python tools/live.py --list       # which camera numbers work
-    ./venv/bin/python tools/live.py --camera 1 --lab examples/basicboard_rewired.json
+    ./venv/bin/python tools/live.py --camera 1 --lab examples/basicboard_demo.json
+    ... --build examples/basicboard_as_built.json   # and say which leg to move
 
 Point the camera so the whole board is in view. Every hole is drawn where the
 rectifier thinks it is. Green means the fit is usable; orange means it is not,
@@ -14,7 +15,10 @@ out/live/.
 
 With --lab and the board on USB, c checks the wiring. It blinks each LED in turn
 while you watch (tools/blink.py), then shows what works and what to fix, drawn on
-the picture. Any key returns to the live view; c checks again. Each check's
+the picture. With --build, a circuit file describing the board as built (standing in
+for the vision model) is read afresh at each c, and the answer names the fix
+down to the hole when blinking confirms that description (tools/blink.py). Any
+key returns to the live view; c checks again. Each check's
 photos are saved to data/cache/blink/<time>/, so tools/blink.py --replay can
 judge it again.
 
@@ -217,14 +221,26 @@ class _Watched:
 
 
 def check_now(
-    cap: cv2.VideoCapture, board: Board, lab: Netlist, title: str, camera: int
+    cap: cv2.VideoCapture,
+    board: Board,
+    lab: Netlist,
+    title: str,
+    camera: int,
+    build: Path | None = None,
 ) -> np.ndarray:
     """Blink and watch through the live window. Returns the verdict picture, RGB."""
     # Imported here: blink.py imports this module's camera helpers.
-    from blink import SAMPLES, SETTLE_S, draw_verdict, print_verdict, save_run
+    from blink import (
+        SAMPLES,
+        SETTLE_S,
+        draw_verdict,
+        entered_note,
+        judge,
+        print_verdict,
+        save_run,
+    )
 
     from breadboard.blink import OUTPUT_PINS, analyse, run_sequence
-    from breadboard.verify import verify
 
     watched = _Watched(board)
 
@@ -273,9 +289,12 @@ def check_now(
     except OSError as e:  # the check itself went fine; only the copy failed
         print(f"could not save the photos: {e}")
     session = analyse(frames, OUTPUT_PINS, shorted)
-    result = verify(lab, session, OUTPUT_PINS)
+    result = judge(lab, build, session, OUTPUT_PINS)
+    note = entered_note(build) if build else None
     print_verdict(result)
-    return draw_verdict(frames["base"], session, result)
+    if note:
+        print(f"({note})")
+    return draw_verdict(frames["base"], session, result, note)
 
 
 def _connect() -> Board:
@@ -300,7 +319,9 @@ def _exit_on_signal(signum: int, _frame: object) -> None:
     raise SystemExit(128 + signum)
 
 
-def run(index: int, out: Path, lab: Netlist | None = None) -> int:
+def run(
+    index: int, out: Path, lab: Netlist | None = None, build: Path | None = None
+) -> int:
     cap = open_camera(index)
     if not cap.isOpened():
         print(f"Could not open camera {index}. {_PERMISSION_HINT}")
@@ -349,7 +370,7 @@ def run(index: int, out: Path, lab: Netlist | None = None) -> int:
                 try:
                     if board is None:
                         board = _connect()
-                    result = check_now(cap, board, lab, title, index)
+                    result = check_now(cap, board, lab, title, index, build)
                 except (OSError, cv2.error) as e:
                     print(f"Could not check: {e}")
                     if board is not None and isinstance(e, OSError):
@@ -381,15 +402,22 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="list working camera numbers")
     ap.add_argument("--out", default="out/live", help="where s saves (default out/live)")
     ap.add_argument("--lab", type=Path, help="lab file; c then checks the wiring")
+    ap.add_argument(
+        "--build",
+        type=Path,
+        help="circuit file of the board as built, read at each c (needs --lab)",
+    )
     args = ap.parse_args()
     if args.list:
         return list_cameras()
+    if args.build and not args.lab:
+        ap.error("--build needs --lab")
     lab = None
     if args.lab:
         from blink import load_lab
 
         lab = load_lab(args.lab)
-    return run(args.camera, Path(args.out), lab)
+    return run(args.camera, Path(args.out), lab, args.build)
 
 
 if __name__ == "__main__":

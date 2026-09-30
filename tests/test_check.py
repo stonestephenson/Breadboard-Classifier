@@ -10,6 +10,10 @@ Three behaviours matter more than the rest:
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+from breadboard import board as board_module
 from breadboard.check import check
 from breadboard.netlist import Component, Netlist, Pin
 
@@ -195,9 +199,11 @@ class TestSanityRulesWithoutAReference:
         )
         assert "short_circuit" in kinds(check(n))
 
-    def test_the_far_half_of_a_split_rail_is_flagged(self):
-        # The WB-102's rails are two separate runs. Power goes into one half,
+    def test_the_far_half_of_a_split_rail_is_flagged(self, monkeypatch):
+        # On a board whose rails are two separate runs (the kit's own board's
+        # are not; see board.RAILS_SPLIT). Power goes into one half,
         # the LED is wired to the other, and nothing works for no visible reason.
+        monkeypatch.setattr(board_module, "RAILS_SPLIT", True)
         n = Netlist(
             components=[
                 mcu(**{"5V": "p1+:5", "GND": "a30"}),
@@ -207,7 +213,18 @@ class TestSanityRulesWithoutAReference:
         )
         assert "dead_rail_segment" in kinds(check(n))
 
-    def test_using_the_powered_half_of_a_rail_is_fine(self):
+    def test_the_kits_continuous_rails_have_no_dead_half(self):
+        n = Netlist(
+            components=[
+                mcu(**{"5V": "p1+:5", "GND": "a30"}),
+                part("R1", "resistor", "p1+:40", "a20", ohms=330),
+                part("L1", "led", "a20", "a30", color="red"),
+            ]
+        )
+        assert "dead_rail_segment" not in kinds(check(n))
+
+    def test_using_the_powered_half_of_a_rail_is_fine(self, monkeypatch):
+        monkeypatch.setattr(board_module, "RAILS_SPLIT", True)
         n = Netlist(
             components=[
                 mcu(**{"5V": "p1+:5", "GND": "a30"}),
@@ -230,3 +247,42 @@ class TestFindingQuality:
         student.components.append(part("L9", "led", "a40", "a45", color="green"))
         found = check(student, blink())
         assert found[0].kind in {"wrong_connection", "extra_component"}
+
+
+# --- wires are joins, not parts ---------------------------------------------
+
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
+
+
+def _example(name: str) -> Netlist:
+    return Netlist.from_json(json.loads((EXAMPLES / f"{name}.json").read_text()))
+
+
+class TestWires:
+    def test_a_build_using_jumpers_the_lab_drawing_does_not_is_the_same_circuit(self):
+        # The demo board reaches every pin, and ground, through jumper wires;
+        # the lab draws each resistor straight into the pin's strip.
+        assert check(_example("basicboard_as_built"), _example("basicboard_demo")) == []
+
+    def test_a_missing_jumper_is_reported_as_missing_not_as_a_part_moved(self):
+        lab = _example("activity3")
+        student = _example("activity3")
+        student.components = [c for c in student.components if c.id != "W_signal"]
+        found = check(student, lab)
+        assert kinds(found) == ["missing_component"]
+        assert "wire" in found[0].message
+
+    def test_an_extra_jumper_is_taken_off_not_moved(self):
+        lab = _example("activity3")
+        student = _example("activity3")
+        student.components.append(part("W_extra", "wire", "j36", "b12"))  # A1 to OUT
+        found = check(student, lab)
+        assert kinds(found) == ["extra_component"]
+        assert found[0].components == ("W_extra",)
+        assert found[0].suggestion == "Take it off the board."
+
+    def test_a_wire_joining_two_pins_is_not_the_same_circuit(self):
+        lab = _example("basicboard_demo")
+        student = _example("basicboard_as_built")
+        student.components.append(part("W_join", "wire", "b53", "b54"))  # pins 3 and 4
+        assert check(student, lab) != []

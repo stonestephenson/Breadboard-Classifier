@@ -57,8 +57,12 @@ a column are electrically one node; f–j likewise. So we never need to know whe
 |---|---|
 | Physical tie-points | 830 |
 | Terminal nodes (63 columns × 2 halves) | 126 |
-| Rail segment nodes (4 rails × 2 segments) | 8 |
-| **Electrical nodes we must resolve** | **134** |
+| Rail nodes (4 continuous rails) | 4 |
+| **Electrical nodes we must resolve** | **130** |
+
+*(Corrected 2026-09-29: the generator's spec split each rail in two, 8 nodes and 134 in all.
+The kit's real board lit LEDs grounded on both halves of one rail, so its rails run the whole
+length. `board.RAILS_SPLIT` keeps the split model for a board that needs it.)*
 
 We need **column** and **which half**, not which hole. That is a 5× relaxation along the axis
 that would otherwise hurt most, and it is what makes the hard path affordable.
@@ -168,7 +172,7 @@ and it could not anchor the grid's origin or orientation.
 All perception happens *after* rectification, where perspective, scale and rotation are already
 gone. This is a much smaller problem than perceiving in raw photo space.
 
-1. **Occupancy** — is each of the 134 nodes occupied?
+1. **Occupancy** — is each of the 130 nodes occupied?
 2. **Classification** — what is each occupying object? Vocabulary is small (see §5).
 3. **Association** — which two nodes does each object bridge?
 
@@ -274,6 +278,14 @@ building a full Netlist, because blinking cannot see legs or resistors.
 **Stage B — if it fails, what is the smallest fix?** Compute the minimum edit against whichever
 valid arrangement is closest to what the student actually built. The edit *is* the diagnosis:
 "move this one connection from here to there" rather than "wrong".
+
+*Demo form (2026-09-29): `breadboard/diagnose.py`.* Until the model exists, a person describes the
+build in a circuit file, the same file the model will produce. That description is inference-grade,
+so it is checked against measurement first: it predicts what each pin lights (colour and column),
+and a backwards LED or empty pin stays dark. If blinking disagrees on any pin, no fix is shown. If
+it agrees, `check.py` names the fix down to the hole, drawn on the photo. The checker compares
+wires as joins between strips, not parts, so a build that uses jumpers where the lab's drawing
+does not is still the same circuit.
 
 These graphs are tiny — 10–30 typed nodes — so exact computation is instant. This stage is
 **deterministic code, fully unit-testable, with no learned components**, and `mutations.py`

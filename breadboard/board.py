@@ -4,14 +4,15 @@ Two facts about a breadboard drive this whole project:
 
 1. **Holes in a column strip are electrically identical.** Rows a-e in column 24
    are one node; f-j are another. So a lead's *row* never matters — only its
-   column and which half it is in. That collapses 830 physical holes into 134
+   column and which half it is in. That collapses 830 physical holes into 130
    electrical nodes and relaxes the precision the camera must achieve by 5x
    along the axis that would otherwise hurt most.
 
-2. **The power rails are split.** Each of the four rails is two separate 25-hole
-   runs, not one continuous strip. Students wire power into one half and ground
-   into the other, see nothing work, and cannot tell why. Modelling the split is
-   what lets us name that error.
+2. **The power rails run the whole length** on the kit's real board (measured;
+   see RAILS_SPLIT). Some boards split each rail into two separate runs, where
+   students wire power into one half and ground into the other, see nothing
+   work, and cannot tell why. RAILS_SPLIT models that too, which is what lets
+   the checker name that error on such a board.
 
 Hole addressing (also the format curriculum authors will write):
 
@@ -36,7 +37,14 @@ N_COLS = 63
 
 RAILS = ("p1+", "p1-", "p2+", "p2-")
 RAIL_HOLES = 50
-RAIL_SEGMENT_HOLES = 25  # each rail is two independent runs of this length
+# Whether each rail is two separate runs of RAIL_SEGMENT_HOLES, as the generator's
+# board_spec.json says. The kit's real board says not: on 2026-09-28 and again on
+# 2026-09-29, LEDs grounded into the p2- rail at holes 11-25 lit through a single
+# ground wire at hole 45-48, which a split between holes 25 and 26 would have
+# made impossible. So the rails are modelled as continuous. The split model, and
+# the dead_rail_segment rule it enables, stay for a board that turns out split.
+RAILS_SPLIT = False
+RAIL_SEGMENT_HOLES = 25  # the length of each run, when RAILS_SPLIT
 RAIL_START_COL = 3  # rail hole 1 sits over terminal column 3
 # Outermost terminal row (a or j) to the nearest rail row. Measured, not specified:
 # the rectifier's hole template, fitted to real photos, puts it at 2.83 pitches, and
@@ -84,20 +92,22 @@ def node_of(hole: str) -> str:
     """The electrical node a hole belongs to.
 
     Terminal nodes are named "T:<half>:<column>" where half is the row group
-    that shares the strip. Rail nodes are "R:<rail>:<segment>".
+    that shares the strip. Rail nodes are "R:<rail>:<segment>"; with continuous
+    rails (RAILS_SPLIT False) every rail is one segment.
     """
     where, index = parse_hole(hole)
     if where in ROWS:
         half = "ae" if where in ROWS_UPPER else "fj"
         return f"T:{half}:{index}"
-    segment = 1 if index <= RAIL_SEGMENT_HOLES else 2
+    segment = 2 if RAILS_SPLIT and index > RAIL_SEGMENT_HOLES else 1
     return f"R:{where}:{segment}"
 
 
 def nodes() -> list[str]:
     """Every electrical node on the board, in a stable order."""
     out = [f"T:{half}:{col}" for col in range(1, N_COLS + 1) for half in ("ae", "fj")]
-    out += [f"R:{rail}:{seg}" for rail in RAILS for seg in (1, 2)]
+    segments = (1, 2) if RAILS_SPLIT else (1,)
+    out += [f"R:{rail}:{seg}" for rail in RAILS for seg in segments]
     return out
 
 

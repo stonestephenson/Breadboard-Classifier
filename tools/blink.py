@@ -2,7 +2,8 @@
 
     ./venv/bin/python tools/blink.py --camera 1       # run it on the board
     ./venv/bin/python tools/blink.py --replay DIR     # re-judge a saved run
-    ... --lab examples/basicboard_rewired.json        # and check it against a lab
+    ... --lab examples/basicboard_demo.json           # and check it against a lab
+    ... --build examples/basicboard_as_built.json     # and say which leg to move
 
 Needs the board on USB, a lit room, and a camera that sees the whole board for
 the ~20 s a run takes. The board can be held in a hand: the photos are lined up
@@ -11,6 +12,11 @@ on the board before they are compared. The laptop switches the output pins
 sketch's memory commands (tools/probe.py Board.drive_only). The camera
 photographs the board with each pin on and then off, and breadboard/blink.py
 works out what lit.
+
+With --build, a circuit file describing the board as built stands in for the
+vision model that will one day read it from the photo (breadboard/diagnose.py).
+If blinking confirms the description, the answer names the fix down to the
+hole; if not, it says the description does not match the board.
 
 It prints one line per pin, and writes:
   data/cache/blink/<time>/   the frames, so the run can be re-judged (--replay)
@@ -32,6 +38,7 @@ import signal
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 import cv2
@@ -40,6 +47,8 @@ from live import first_frame, open_camera
 from probe import Board, autodetect
 
 from breadboard.blink import OUTPUT_PINS, Session, analyse, run_sequence
+from breadboard.check import Finding
+from breadboard.diagnose import diagnose
 from breadboard.netlist import Netlist, NetlistError
 from breadboard.verify import Verdict, verify
 
@@ -239,12 +248,16 @@ VERDICT_COLOURS = {  # RGB
 }
 
 
-def draw_verdict(photo: np.ndarray, session: Session, verdict: Verdict) -> np.ndarray:
+def draw_verdict(
+    photo: np.ndarray, session: Session, verdict: Verdict, note: str | None = None
+) -> np.ndarray:
     """The photo with each lit LED circled by verdict, and the answer in a panel.
 
     Green: that pin lit the LED the lab wants. Red: an LED lit on the wrong pin.
     Amber: something doubtful or unexpected. A dark LED cannot be circled; nobody
-    knows where it is. That is said in the panel.
+    knows where it is, unless a finding names its holes (from a described build):
+    those holes are ringed in the finding's colour. note, if given, is the last
+    line of the panel.
     """
     out = photo.copy()
     scale = out.shape[1] / 1920
@@ -278,6 +291,9 @@ def draw_verdict(photo: np.ndarray, session: Session, verdict: Verdict) -> np.nd
     if verdict.caveat:
         for part in _wrap(verdict.caveat, width, 0.8 * scale):
             lines.append((part, (200, 200, 200), 0.8))
+    if note:
+        for part in _wrap(note, width, 0.8 * scale):
+            lines.append((part, (120, 200, 255), 0.8))
 
     step = round(42 * scale)
     panel_h = step * len(lines) + round(30 * scale)
@@ -290,6 +306,24 @@ def draw_verdict(photo: np.ndarray, session: Session, verdict: Verdict) -> np.nd
         glow_pin = f.detail.get("glow")
         if isinstance(glow_pin, int):
             flagged.setdefault(glow_pin, f.severity)
+    if session.rect is not None:
+        for f in verdict.findings:
+            colour = VERDICT_COLOURS.get(f.severity, (255, 255, 255))
+            spots = []
+            for hole in f.holes:
+                try:  # holes as typed by hand: "D31" is d31
+                    spots.append(
+                        tuple(round(v) for v in session.rect.to_photo(hole.lower()))
+                    )
+                except KeyError:
+                    continue
+            for x, y in spots:
+                ring = max(2, round(4 * scale))
+                cv2.circle(out, (x, y), round(14 * scale), colour, ring)
+            if spots:
+                x, y = min(spots, key=lambda p: p[1])
+                label = ", ".join(f.holes)
+                text(label, (x - round(20 * scale), y - round(24 * scale)), colour, 0.7)
     for glow in session.glows.values():
         if not glow.lit or glow.photo_xy is None:
             continue
@@ -326,6 +360,8 @@ def print_verdict(verdict: Verdict) -> None:
     print(verdict.summary)
     for f in verdict.findings:
         print(f"  [{f.severity}] {f.message}")
+        if f.holes:
+            print(f"      at {', '.join(f.holes)}")
         if f.suggestion:
             print(f"      -> {f.suggestion}")
     if verdict.caveat:
@@ -339,13 +375,50 @@ def load_lab(path: Path) -> Netlist:
         raise SystemExit(f"cannot read the lab file {path}: {e}") from e
 
 
+def entered_note(build: Path) -> str:
+    """The on-screen reminder that a person, not a model, described the build."""
+    return f"Parts entered by hand ({build.name}). A trained model will do this step."
+
+
+def judge(
+    lab: Netlist, build: Path | None, session: Session, pins: Sequence[int]
+) -> Verdict:
+    """The verdict: blinking against the lab, or, given a description of the
+    build, the fixes it confirms. The description is read afresh each time, so
+    it can be edited between checks. One that cannot be read is said to be so."""
+    if build is None:
+        return verify(lab, session, pins)
+    try:
+        described = Netlist.from_json(json.loads(build.read_text()))
+    except (OSError, ValueError, NetlistError, KeyError, TypeError, AttributeError) as e:
+        # A hand-edited file can be malformed in any shape; say so, don't crash.
+        return Verdict(
+            False,
+            "Could not read the entered parts.",
+            (
+                Finding(
+                    "entry_unreadable",
+                    f"{build}: {e}",
+                    severity="uncertain",
+                    suggestion="Fix the file and check again.",
+                ),
+            ),
+        )
+    return diagnose(described, lab, session, pins)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Light each LED in turn; find it on camera.")
     ap.add_argument("--camera", type=int, default=0, help="camera number (default 0)")
     ap.add_argument("--replay", type=Path, help="re-judge a saved run instead")
     ap.add_argument("--lab", type=Path, help="check the result against this lab file")
+    ap.add_argument(
+        "--build", type=Path, help="circuit file of the board as built (needs --lab)"
+    )
     ap.add_argument("--out", type=Path, default=Path("out/blink"))
     args = ap.parse_args()
+    if args.build and not args.lab:
+        ap.error("--build needs --lab")
     lab = load_lab(args.lab) if args.lab else None
 
     try:
@@ -357,11 +430,14 @@ def main() -> int:
     session = analyse(frames, pins, shorted)
     print("\n".join(report(session, pins)))
 
-    verdict = verify(lab, session, pins) if lab is not None else None
+    verdict = judge(lab, args.build, session, pins) if lab is not None else None
     if verdict is not None:
+        note = entered_note(args.build) if args.build else None
         print()
         print_verdict(verdict)
-        picture_rgb = draw_verdict(frames["base"], session, verdict)
+        if note:
+            print(f"({note})")
+        picture_rgb = draw_verdict(frames["base"], session, verdict, note)
     else:
         picture_rgb = draw(frames, session)
 

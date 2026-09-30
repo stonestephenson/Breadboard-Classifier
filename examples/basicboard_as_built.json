@@ -1,0 +1,256 @@
+{
+  "board": "WB-102",
+  "name": "basicboard (demo board as built 2026-09-29)",
+  "components": [
+    {
+      "id": "MCU",
+      "type": "mcu",
+      "pins": {
+        "D3": {
+          "hole": "c53"
+        },
+        "D4": {
+          "hole": "c54"
+        },
+        "D5": {
+          "hole": "c55"
+        },
+        "D6": {
+          "hole": "c56"
+        },
+        "GND": {
+          "hole": "g59"
+        }
+      },
+      "origin": "factory"
+    },
+    {
+      "id": "W_ground",
+      "type": "wire",
+      "pins": {
+        "1": {
+          "hole": "h59"
+        },
+        "2": {
+          "hole": "p2-:48"
+        }
+      }
+    },
+    {
+      "id": "W_white",
+      "type": "wire",
+      "pins": {
+        "1": {
+          "hole": "a53"
+        },
+        "2": {
+          "hole": "a28"
+        }
+      }
+    },
+    {
+      "id": "LED_white",
+      "type": "led",
+      "pins": {
+        "anode": {
+          "hole": "d28"
+        },
+        "cathode": {
+          "hole": "d27"
+        }
+      },
+      "attrs": {
+        "color": "white"
+      }
+    },
+    {
+      "id": "R_white",
+      "type": "resistor",
+      "pins": {
+        "1": {
+          "hole": "e27"
+        },
+        "2": {
+          "hole": "h27"
+        }
+      },
+      "attrs": {
+        "ohms": 330
+      }
+    },
+    {
+      "id": "J_white",
+      "type": "wire",
+      "pins": {
+        "1": {
+          "hole": "i27"
+        },
+        "2": {
+          "hole": "p2-:21"
+        }
+      }
+    },
+    {
+      "id": "W_blue",
+      "type": "wire",
+      "pins": {
+        "1": {
+          "hole": "a54"
+        },
+        "2": {
+          "hole": "a32"
+        }
+      }
+    },
+    {
+      "id": "LED_blue",
+      "type": "led",
+      "pins": {
+        "anode": {
+          "hole": "d32"
+        },
+        "cathode": {
+          "hole": "d31"
+        }
+      },
+      "attrs": {
+        "color": "blue"
+      }
+    },
+    {
+      "id": "R_blue",
+      "type": "resistor",
+      "pins": {
+        "1": {
+          "hole": "e31"
+        },
+        "2": {
+          "hole": "h31"
+        }
+      },
+      "attrs": {
+        "ohms": 330
+      }
+    },
+    {
+      "id": "J_blue",
+      "type": "wire",
+      "pins": {
+        "1": {
+          "hole": "i31"
+        },
+        "2": {
+          "hole": "p2-:25"
+        }
+      }
+    },
+    {
+      "id": "W_green",
+      "type": "wire",
+      "pins": {
+        "1": {
+          "hole": "a55"
+        },
+        "2": {
+          "hole": "a38"
+        }
+      }
+    },
+    {
+      "id": "LED_green",
+      "type": "led",
+      "pins": {
+        "anode": {
+          "hole": "d38"
+        },
+        "cathode": {
+          "hole": "d37"
+        }
+      },
+      "attrs": {
+        "color": "green"
+      }
+    },
+    {
+      "id": "R_green",
+      "type": "resistor",
+      "pins": {
+        "1": {
+          "hole": "e37"
+        },
+        "2": {
+          "hole": "h37"
+        }
+      },
+      "attrs": {
+        "ohms": 330
+      }
+    },
+    {
+      "id": "J_green",
+      "type": "wire",
+      "pins": {
+        "1": {
+          "hole": "i37"
+        },
+        "2": {
+          "hole": "p2-:30"
+        }
+      }
+    },
+    {
+      "id": "W_red",
+      "type": "wire",
+      "pins": {
+        "1": {
+          "hole": "a56"
+        },
+        "2": {
+          "hole": "a44"
+        }
+      }
+    },
+    {
+      "id": "LED_red",
+      "type": "led",
+      "pins": {
+        "anode": {
+          "hole": "d44"
+        },
+        "cathode": {
+          "hole": "d43"
+        }
+      },
+      "attrs": {
+        "color": "red"
+      }
+    },
+    {
+      "id": "R_red",
+      "type": "resistor",
+      "pins": {
+        "1": {
+          "hole": "e43"
+        },
+        "2": {
+          "hole": "h43"
+        }
+      },
+      "attrs": {
+        "ohms": 330
+      }
+    },
+    {
+      "id": "J_red",
+      "type": "wire",
+      "pins": {
+        "1": {
+          "hole": "i43"
+        },
+        "2": {
+          "hole": "p2-:35"
+        }
+      }
+    }
+  ]
+}

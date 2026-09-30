@@ -24,7 +24,8 @@ Chrome on school-issued machines).
 | Electrical probe (`tools/probe.py`) | **Working on real hardware.** `docs/FIRMWARE_PROTOCOL.md` |
 | Rectifier (`breadboard/rectify.py`) | **Working on real photos**, and live on a webcam (`tools/live.py`). Built on the vendored breadboard-normalizer. `docs/SPIKE_RECTIFY.md` |
 | Blink and watch (`breadboard/blink.py`, `tools/blink.py`) | **Working on the real board.** Each LED found by its pin, colour and column, no trained model. |
-| Does it work? (`breadboard/verify.py`) | **Working.** Blink results checked against a lab file: findings plus a verdict drawn on the photo. Demo: `tools/live.py --camera 1 --lab examples/basicboard_rewired.json`, press `c`. |
+| Does it work? (`breadboard/verify.py`) | **Working.** Blink results checked against a lab file: findings plus a verdict drawn on the photo. Demo: `tools/live.py --camera 1 --lab examples/basicboard_demo.json`, press `c`. |
+| Which leg to move? (`breadboard/diagnose.py`) | **Working, with the build entered by hand** in place of the vision model: `examples/basicboard_as_built.json`. Trusted only where blinking confirms it; then the checker's fix, down to the hole, is drawn on the photo. Demo: add `--build examples/basicboard_as_built.json`. |
 | Per-node occupancy from photos | Not started; a trained model needs data |
 | Lab reference circuits | BasicBoard and Activity 3 done; others need the curriculum |
 
@@ -47,8 +48,11 @@ one laptop, with no trained vision model:
    (`tests/test_probe_board.py`).
 5. **Stage B: say which leg to move.** For a dark LED, name the exact hole. This needs leg
    positions, so either the trained model or classical detection of the unlit LED's body.
-   `examples/basicboard_rewired.json` is the user's own build; the real curriculum labs come
-   later.
+   For the demo a person describes the build in a circuit file instead
+   (`breadboard/diagnose.py`); the model will later produce the same file. The description
+   is checked against blinking before any fix is shown. `examples/basicboard_demo.json` is
+   the lab for the user's demo board (rebuilt 2026-09-29), `examples/basicboard_as_built.json`
+   its description; the real curriculum labs come later.
 
 ## The one principle
 

@@ -12,6 +12,7 @@ tests pin down.
 
 from __future__ import annotations
 
+from breadboard import board as board_module
 from breadboard.check import check
 from breadboard.netlist import Component, Netlist, Pin
 
@@ -157,7 +158,9 @@ class TestStudentAdditions:
             )
         assert check(a, b) == []
 
-    def test_a_wire_into_the_dead_half_of_a_rail_is_caught(self):
+    def test_a_wire_into_the_dead_half_of_a_rail_is_caught(self, monkeypatch):
+        # Only on a board with split rails; the kit's own board has none.
+        monkeypatch.setattr(board_module, "RAILS_SPLIT", True)
         board = basicboard()
         board["MCU"].pins["5V"] = Pin("p1+:5")
         board.components.append(

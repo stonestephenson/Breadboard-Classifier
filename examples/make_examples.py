@@ -29,7 +29,7 @@ REWIRED = [
     ("D4", "white", 28),
     ("D5", "red", 36),
 ]
-MCU_COL = {"D2": 44, "D3": 46, "D4": 48, "D5": 50}
+MCU_COL = {"D2": 44, "D3": 46, "D4": 48, "D5": 50, "D6": 52}
 GND_COL = 58
 
 
@@ -61,6 +61,86 @@ def basicboard(leds=LEDS, name: str = "basicboard") -> Netlist:
 
 def basicboard_rewired() -> Netlist:
     return basicboard(REWIRED, "basicboard (rewired 2026-09-27)")
+
+
+# The demo lab (2026-09-29): pin 3 white, 4 blue, 5 green, 6 red, each through a
+# resistor to ground. It is what Stone's demo board below was built to do.
+DEMO = [("D3", "white", 12), ("D4", "blue", 20), ("D5", "green", 28), ("D6", "red", 36)]
+
+
+def basicboard_demo() -> Netlist:
+    return basicboard(DEMO, "basicboard (demo lab 2026-09-29)")
+
+
+# Stone's demo board as built on 2026-09-29, as Stone described it and blinking
+# confirmed (pin 3 white at column 27, 4 blue at 32, 5 green at 38, 6 red at 44).
+# The Metro Mini's top pins are at column 63: its digital pins in row c (13 at
+# column 63 down to 3 at column 53), its power pins in row g (GND at column 59).
+# Each LED: (pin, colour, short-leg column). Short leg in d<col>, long leg in
+# d<col+1>; a resistor from e<col> across the centre gap to h<col>; a jumper from
+# i<col> to the ground row of the rail beside row j; and a wire from a<col+1> to
+# row a of its pin's column. One wire joins GND (h59) to that ground row.
+AS_BUILT = [
+    ("D3", "white", 27),
+    ("D4", "blue", 31),
+    ("D5", "green", 37),
+    ("D6", "red", 43),
+]
+AS_BUILT_PIN_COL = {"D3": 53, "D4": 54, "D5": 55, "D6": 56}
+AS_BUILT_GND_COL = 59
+
+
+def rail_hole_above(col: int, rail: str) -> str:
+    """The rail hole level with a terminal column. Rails come in groups of five
+    starting at column 3, with a gap every sixth column."""
+    group, within = divmod(col - 3, 6)
+    if col < 3 or within == 5:
+        raise ValueError(f"no rail hole at column {col}")
+    return f"{rail}:{group * 5 + within + 1}"
+
+
+def basicboard_as_built() -> Netlist:
+    """The demo board as built, standing in for what a vision model will read."""
+    mcu = {pin: Pin(f"c{col}") for pin, col in AS_BUILT_PIN_COL.items()}
+    mcu["GND"] = Pin(f"g{AS_BUILT_GND_COL}")
+    parts: list[Component] = [
+        Component(id="MCU", type="mcu", origin="factory", pins=mcu),
+        Component(
+            id="W_ground",
+            type="wire",
+            pins={
+                "1": Pin(f"h{AS_BUILT_GND_COL}"),
+                "2": Pin(rail_hole_above(AS_BUILT_GND_COL, "p2-")),
+            },
+        ),
+    ]
+    for pin, colour, col in AS_BUILT:
+        long = col + 1
+        parts += [
+            Component(
+                id=f"W_{colour}",
+                type="wire",
+                pins={"1": Pin(f"a{AS_BUILT_PIN_COL[pin]}"), "2": Pin(f"a{long}")},
+            ),
+            Component(
+                id=f"LED_{colour}",
+                type="led",
+                attrs={"color": colour},
+                pins={"anode": Pin(f"d{long}"), "cathode": Pin(f"d{col}")},
+            ),
+            Component(
+                id=f"R_{colour}",
+                type="resistor",
+                attrs={"ohms": 330},
+                pins={"1": Pin(f"e{col}"), "2": Pin(f"h{col}")},
+            ),
+            Component(
+                id=f"J_{colour}",
+                type="wire",
+                pins={"1": Pin(f"i{col}"), "2": Pin(rail_hole_above(col, "p2-"))},
+            ),
+        ]
+    return Netlist(name="basicboard (demo board as built 2026-09-29)", components=parts)
 
 
 def led_moved() -> Netlist:
@@ -225,6 +305,8 @@ EXAMPLES = {
     "activity3_uncertain.json": activity3_uncertain,
     "basicboard.json": basicboard,
     "basicboard_rewired.json": basicboard_rewired,
+    "basicboard_demo.json": basicboard_demo,
+    "basicboard_as_built.json": basicboard_as_built,
     "basicboard_led_moved.json": led_moved,
     "basicboard_led_reversed.json": led_reversed,
     "basicboard_uncertain.json": unsure_reading,

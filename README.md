@@ -52,8 +52,10 @@ The others are worth running to see the behaviours that matter most:
 | `basicboard_led_reversed.json` | Reversed polarity reported as such, not as bad wiring |
 | `basicboard_uncertain.json` | **The same displacement, but flagged as a doubtful reading — the checker declines to call it an error and asks for a better photo instead** |
 | `basicboard_no_resistor.json` | Caught with **no lab file at all** (`check` without `--lab`) |
-| `basicboard_dead_rail.json` | The unpowered half of a split power rail — invisible on the board |
-| `basicboard_rewired.json` | Not a mistake: the BasicBoard as rewired on 2026-09-27 (pin 2 green, 3 blue, 4 white, 5 red), the lab for the live demo |
+| `basicboard_dead_rail.json` | The unpowered half of a split power rail. The kit's own board turned out to have continuous rails (`board.RAILS_SPLIT`), so this only applies to a split-rail board |
+| `basicboard_rewired.json` | Not a mistake: the BasicBoard as rewired on 2026-09-27 (pin 2 green, 3 blue, 4 white, 5 red) |
+| `basicboard_demo.json` | The lab for the live demo board, rebuilt 2026-09-29: pin 3 white, 4 blue, 5 green, 6 red |
+| `basicboard_as_built.json` | That demo board as built, every leg in its hole: the file a vision model will one day produce |
 
 **Activity 3 (Intro to Sensors)** is the first lab with real wiring, and its answer is fixed by
 the worksheet: the light sensor's + to 3V, − to GND, OUT to A0, with three jumper wires placed
@@ -102,7 +104,7 @@ Plug a Metro Mini in over USB (a **data** cable, not charge-only):
 # pin  5  red LED at column 15
 # pins 6-10  nothing lit
 ./venv/bin/python tools/blink.py --replay data/cache/blink/<run>   # re-judge a saved run
-./venv/bin/python tools/blink.py --camera 1 --lab examples/basicboard_rewired.json
+./venv/bin/python tools/blink.py --camera 1 --lab examples/basicboard_demo.json
 # Every LED lights from the right pin, so your wiring works. ...
 ```
 
@@ -115,6 +117,13 @@ hands: the photos are lined up on the board itself before they are compared. Onl
 the pin under test is ever driven. Every other pin is disconnected, so pins wired together
 cannot fight, and no pin can pose as a ground. A pin tied to ground is released at once. However
 the run ends, the board is handed back as the program set it up.
+
+Add `--build examples/basicboard_as_built.json` (to `tools/blink.py` or `tools/live.py`) to say
+which leg to move. That file describes the board as built, standing in for the vision model that
+will one day read it from the photo; edit it to match the board and check again. It is trusted
+only where blinking confirms it. If it does, the answer names the fix down to the hole ("The blue
+LED is in the wrong way round… at d31, d32"), drawn on the photo. If not, it says the entered
+parts don't match the board, and shows no fix.
 
 `--analog` is Activity 3's own acceptance test, measured directly. Continuity cannot see that
 lab at all — a sensor is not a short, so the three jumper wires join nothing a scan detects — but
@@ -142,7 +151,7 @@ measures that stop it shorting an output driver.
 Live, on a webcam: `./venv/bin/python tools/live.py` (`--list` to find cameras; an iPhone via
 Continuity Camera works well). It marks every hole on the moving picture, green when usable.
 
-**The demo:** `tools/live.py --camera 1 --lab examples/basicboard_rewired.json` with the board on
+**The demo:** `tools/live.py --camera 1 --lab examples/basicboard_demo.json` with the board on
 USB. Press `c`. Each LED blinks in turn on screen, then the answer is drawn on the picture: green
 circles for LEDs on the right pin, red for the wrong pin, and a plain sentence for each problem
 and its fix. Pull an LED leg and press `c` again to see a dark LED reported.

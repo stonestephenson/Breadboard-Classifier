@@ -185,9 +185,10 @@ def _leds_without_resistors(n: Netlist) -> list[Finding]:
 def _dead_rail_segments(n: Netlist) -> list[Finding]:
     """A rail half that nothing powers, while its other half is powered.
 
-    The WB-102's power rails are two separate 25-hole runs. The paint runs the
-    whole length, so a connection into the wrong half looks perfectly correct
-    and simply does nothing -- one of the few errors that is genuinely invisible.
+    Only on a board whose power rails are two separate runs (board.RAILS_SPLIT;
+    the kit's own board's are not). There the paint runs the whole length, so a
+    connection into the wrong half looks perfectly correct and simply does
+    nothing -- one of the few errors that is genuinely invisible.
     """
     power, ground = _supply_nodes(n)
     supplied = power | ground
@@ -297,6 +298,16 @@ def _diff(student: Netlist, reference: Netlist) -> list[Finding]:
     if inventory:
         return inventory
 
+    # Wires are joins, not parts, so a build may use more or fewer than the lab's
+    # drawing. But when the circuits differ, a missing or extra wire is the
+    # likelier story than a correctly placed part being in the wrong hole.
+    missing = _missing_wires(student, reference)
+    if missing:
+        return missing
+    extra = _extra_wire(student, reference)
+    if extra is not None:
+        return [extra]
+
     repair = _single_pin_repair(student, reference)
     if repair is not None:
         return [repair]
@@ -331,11 +342,13 @@ def _signature(c: Component) -> tuple:
 def _inventory_diff(student: Netlist, reference: Netlist) -> list[Finding]:
     """Parts present in one circuit and not the other, ignoring where they are.
 
-    Covers sensors as well as two-terminal parts; only the Metro Mini is exempt,
-    since it is the fixed anchor rather than something a student adds.
+    Covers sensors as well as two-terminal parts. The Metro Mini is exempt, since
+    it is the fixed anchor rather than something a student adds, and so are
+    wires: they are joins, not parts, and a build may need more or fewer of them
+    than the lab's own drawing (graph.equivalent compares them as joins).
     """
-    s = [c for c in student if c.type != "mcu"]
-    r = [c for c in reference if c.type != "mcu"]
+    s = [c for c in student if c.type not in ("mcu", "wire")]
+    r = [c for c in reference if c.type not in ("mcu", "wire")]
     pool = list(r)
     extra = []
     for c in s:
@@ -350,8 +363,8 @@ def _inventory_diff(student: Netlist, reference: Netlist) -> list[Finding]:
         out.append(
             Finding(
                 kind="extra_component",
-                message=f"There is an extra {_describe(c)} on the board that the "
-                f"lab does not use.",
+                message=f"There is an extra {_describe(c).removeprefix('the ')} on "
+                "the board that the lab does not use.",
                 components=(c.id,),
                 holes=_holes(c),
                 scope=_scope(c),
@@ -362,13 +375,48 @@ def _inventory_diff(student: Netlist, reference: Netlist) -> list[Finding]:
         out.append(
             Finding(
                 kind="missing_component",
-                message=f"The lab needs a {_describe(c)} that is not on the board.",
+                message=f"The lab needs a {_describe(c).removeprefix('the ')} that "
+                "is not on the board.",
                 components=(c.id,),
                 scope=_scope(c),
                 suggestion=f"Add the {_describe(c)}.",
             )
         )
     return out
+
+
+def _missing_wires(student: Netlist, reference: Netlist) -> list[Finding]:
+    """The lab's wires beyond as many as the build has, when it has fewer."""
+    have = len(student.of_type("wire"))
+    need = reference.of_type("wire")
+    return [
+        Finding(
+            kind="missing_component",
+            message="The lab needs a wire that is not on the board.",
+            components=(c.id,),
+            scope=_scope(c),
+            suggestion="Add the wire.",
+        )
+        for c in need[have:]
+    ]
+
+
+def _extra_wire(student: Netlist, reference: Netlist) -> Finding | None:
+    """A wire whose removal alone makes the circuit right."""
+    for wire in student.of_type("wire"):
+        without = deepcopy(student)
+        without.components = [c for c in without.components if c.id != wire.id]
+        if equivalent(without, reference):
+            return Finding(
+                kind="extra_component",
+                message=f"There is an extra {_describe(wire).removeprefix('the ')} on "
+                "the board that the lab does not use.",
+                components=(wire.id,),
+                holes=_holes(wire),
+                scope=_scope(wire),
+                suggestion="Take it off the board.",
+            )
+    return None
 
 
 def _single_pin_repair(student: Netlist, reference: Netlist) -> Finding | None:

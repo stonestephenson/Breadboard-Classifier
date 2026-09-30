@@ -18,12 +18,14 @@ Run the tests with `./venv/bin/python -m pytest tests/ -q` — 109 currently, ~0
 
 **Holes in a column strip are electrically identical.** Rows a–e in column 24 are one node;
 f–j are another. So a lead's *row* never matters, only its column and half. That turns 830
-physical holes into **134 electrical nodes**, and relaxes by 5× the precision the camera has to
+physical holes into **130 electrical nodes**, and relaxes by 5× the precision the camera has to
 achieve along the axis that would otherwise hurt most.
 
-**The power rails are split.** Each of the four rails is two separate 25-hole runs. The painted
-stripe runs the whole length, so a connection into the wrong half looks perfectly correct and
-simply does nothing. It is one of the few student errors that is genuinely invisible, and
+**The power rails run the whole length.** The generator's board spec said each rail was two
+separate 25-hole runs, joined by nothing but a continuous painted stripe. The kit's real board
+disagrees: on 2026-09-28 and 2026-09-29, LEDs grounded into one half of a rail lit through a
+ground wire in the other half. So `board.RAILS_SPLIT` is False. On a board with split rails
+(set it True), a connection into the wrong half looks correct and simply does nothing, and
 `check.py` names it (`dead_rail_segment`).
 
 ## Why comparison happens on an abstraction
@@ -75,7 +77,7 @@ Needing no reference circuit:
 | `shorted_component` | Both legs in one strip, so current skips past the part |
 | `short_circuit` | Power wired straight to ground through wires alone |
 | `led_without_resistor` | An LED across a supply with nothing to limit current |
-| `dead_rail_segment` | Wired into the unpowered half of a split rail |
+| `dead_rail_segment` | Wired into the unpowered half of a split rail (split-rail boards only) |
 
 Needing the lab's intended circuit:
 

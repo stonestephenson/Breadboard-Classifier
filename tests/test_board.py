@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from breadboard import board
 from breadboard.board import (
     ALL_HOLES,
     RAILS,
@@ -40,17 +41,27 @@ class TestTerminalStrips:
             assert node_of(f"a{col}")
 
 
+@pytest.fixture
+def split_rails(monkeypatch):
+    """A board whose rails are two separate runs, as the generator's spec said."""
+    monkeypatch.setattr(board, "RAILS_SPLIT", True)
+
+
 class TestPowerRails:
     def test_holes_within_a_rail_segment_share_a_node(self):
         assert node_of("p1+:1") == node_of("p1+:13") == node_of("p1+:25")
 
-    def test_rail_segments_are_electrically_split(self):
-        # The WB-102's rails are two 25-hole runs, not one continuous strip.
-        # Students wire power into one half and ground into the other and
-        # cannot see why nothing works. We must model this.
+    def test_the_kits_rails_run_the_whole_length(self):
+        # Measured on the real board: LEDs grounded at p2- holes 11-25 lit
+        # through one ground wire at hole 45-48.
+        assert node_of("p2-:21") == node_of("p2-:48")
+
+    def test_a_split_rail_is_two_runs(self, split_rails):
+        # On a board with split rails, students wire power into one half and
+        # ground into the other and cannot see why nothing works.
         assert node_of("p1+:25") != node_of("p1+:26")
 
-    def test_second_segment_is_internally_connected(self):
+    def test_second_segment_of_a_split_rail_is_internally_connected(self, split_rails):
         assert node_of("p1+:26") == node_of("p1+:50")
 
     def test_the_four_rails_are_mutually_separate(self):
@@ -72,8 +83,12 @@ class TestNodeInventory:
         assert len(rail) == 4 * 50 == 200
 
     def test_total_node_count(self):
-        # 63 columns x 2 halves = 126 terminal nodes, plus 4 rails x 2
-        # segments = 8. Every lead we localise resolves to one of these 134.
+        # 63 columns x 2 halves = 126 terminal nodes, plus 4 rails. Every lead
+        # we localise resolves to one of these 130.
+        assert len(nodes()) == 130
+        assert len({node_of(h) for h in ALL_HOLES}) == 130
+
+    def test_total_node_count_with_split_rails(self, split_rails):
         assert len(nodes()) == 134
         assert len({node_of(h) for h in ALL_HOLES}) == 134
 
