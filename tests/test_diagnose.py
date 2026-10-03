@@ -452,6 +452,18 @@ class TestEditingTheFile:
         verdict = judge(LAB, odd, _run(**AS_BUILT_RUN), PINS)
         assert [f.kind for f in verdict.findings] == ["entry_unreadable"]
 
+    def test_a_build_written_like_a_lab_is_refused(self, tmp_path):
+        # Legs on nets say nothing about where anything is, so no fix could
+        # name a hole. The lab's own file handed in as the build, by mistake.
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+        from blink import judge
+
+        verdict = judge(
+            LAB, EXAMPLES / "basicboard_demo.json", _run(**AS_BUILT_RUN), PINS
+        )
+        assert not verdict.works
+        assert [f.kind for f in verdict.findings] == ["entry_unreadable"]
+
     def test_holes_typed_in_capitals_are_drawn_not_crashed_on(self):
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
         from blink import draw_verdict

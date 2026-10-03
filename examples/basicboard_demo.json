@@ -7,19 +7,19 @@
       "type": "mcu",
       "pins": {
         "D3": {
-          "hole": "j46"
+          "net": "D3"
         },
         "D4": {
-          "hole": "j48"
+          "net": "D4"
         },
         "D5": {
-          "hole": "j50"
+          "net": "D5"
         },
         "D6": {
-          "hole": "j52"
+          "net": "D6"
         },
         "GND": {
-          "hole": "j58"
+          "net": "GND"
         }
       },
       "origin": "factory"
@@ -29,128 +29,120 @@
       "type": "resistor",
       "pins": {
         "1": {
-          "hole": "j46"
+          "net": "D3"
         },
         "2": {
-          "hole": "j12"
+          "net": "white"
         }
       },
       "attrs": {
         "ohms": 330
-      },
-      "origin": "factory"
+      }
     },
     {
       "id": "LED_white",
       "type": "led",
       "pins": {
         "anode": {
-          "hole": "j12"
+          "net": "white"
         },
         "cathode": {
-          "hole": "j58"
+          "net": "GND"
         }
       },
       "attrs": {
         "color": "white"
-      },
-      "origin": "factory"
+      }
     },
     {
       "id": "R_blue",
       "type": "resistor",
       "pins": {
         "1": {
-          "hole": "j48"
+          "net": "D4"
         },
         "2": {
-          "hole": "j20"
+          "net": "blue"
         }
       },
       "attrs": {
         "ohms": 330
-      },
-      "origin": "factory"
+      }
     },
     {
       "id": "LED_blue",
       "type": "led",
       "pins": {
         "anode": {
-          "hole": "j20"
+          "net": "blue"
         },
         "cathode": {
-          "hole": "j58"
+          "net": "GND"
         }
       },
       "attrs": {
         "color": "blue"
-      },
-      "origin": "factory"
+      }
     },
     {
       "id": "R_green",
       "type": "resistor",
       "pins": {
         "1": {
-          "hole": "j50"
+          "net": "D5"
         },
         "2": {
-          "hole": "j28"
+          "net": "green"
         }
       },
       "attrs": {
         "ohms": 330
-      },
-      "origin": "factory"
+      }
     },
     {
       "id": "LED_green",
       "type": "led",
       "pins": {
         "anode": {
-          "hole": "j28"
+          "net": "green"
         },
         "cathode": {
-          "hole": "j58"
+          "net": "GND"
         }
       },
       "attrs": {
         "color": "green"
-      },
-      "origin": "factory"
+      }
     },
     {
       "id": "R_red",
       "type": "resistor",
       "pins": {
         "1": {
-          "hole": "j52"
+          "net": "D6"
         },
         "2": {
-          "hole": "j36"
+          "net": "red"
         }
       },
       "attrs": {
         "ohms": 330
-      },
-      "origin": "factory"
+      }
     },
     {
       "id": "LED_red",
       "type": "led",
       "pins": {
         "anode": {
-          "hole": "j36"
+          "net": "red"
         },
         "cathode": {
-          "hole": "j58"
+          "net": "GND"
         }
       },
       "attrs": {
         "color": "red"
-      },
-      "origin": "factory"
+      }
     }
   ]
 }

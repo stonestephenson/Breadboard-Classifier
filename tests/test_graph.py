@@ -45,6 +45,17 @@ def blink_circuit(pin_col=10, mid_col=20, gnd_col=30, swap=False, reverse_led=Fa
     return Netlist(components=[mcu(D2=f"a{pin_col}", GND=f"a{gnd_col}"), *parts])
 
 
+def lab_circuit() -> Netlist:
+    """blink_circuit as a lab would give it: legs on nets, not in holes."""
+    return Netlist(
+        components=[
+            mcu(D2="net:D2", GND="net:GND"),
+            two("C1", "resistor", "net:D2", "net:mid", ohms=330),
+            two("C2", "led", "net:mid", "net:GND", color="red"),
+        ]
+    )
+
+
 class TestBuild:
     def test_mcu_pins_label_the_nodes_they_sit_on(self):
         g = build(blink_circuit())
@@ -115,6 +126,14 @@ class TestEquivalence:
 
     def test_a_reversed_led_does_not_match(self):
         assert not equivalent(blink_circuit(), blink_circuit(reverse_led=True))
+
+    def test_a_lab_written_as_a_circuit_matches_a_build_of_it(self):
+        # The lab says which legs are joined, with no holes at all.
+        assert equivalent(blink_circuit(), lab_circuit())
+        assert equivalent(
+            blink_circuit(pin_col=10, mid_col=45, gnd_col=52), lab_circuit()
+        )
+        assert not equivalent(blink_circuit(reverse_led=True), lab_circuit())
 
     def test_an_led_whose_way_round_was_not_seen_matches_either_way(self):
         # A camera cannot see which way an LED faces, so it cannot be wrong.

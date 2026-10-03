@@ -271,6 +271,79 @@ def _example(name: str) -> Netlist:
     return Netlist.from_json(json.loads((EXAMPLES / f"{name}.json").read_text()))
 
 
+class TestTheLabHasNoPlaces:
+    """Placement is free, so where a lab's own file puts things means nothing."""
+
+    def test_a_lab_written_as_a_circuit_gives_the_same_answers(self):
+        as_circuit = Netlist(
+            components=[
+                mcu(D2="net:D2", GND="net:GND"),
+                part("R1", "resistor", "net:D2", "net:mid", ohms=330),
+                part("L1", "led", "net:mid", "net:GND", color="red"),
+            ]
+        )
+        assert check(blink(), as_circuit) == []
+        for student in (blink(led_from="a21"), blink(led_from="a30", led_to="a20")):
+            told = [
+                (f.kind, f.components, f.suggestion) for f in check(student, as_circuit)
+            ]
+            assert told == [
+                (f.kind, f.components, f.suggestion) for f in check(student, blink())
+            ]
+
+    def test_where_the_labs_file_puts_things_does_not_steer_the_fix(self):
+        # The same lab, laid out at other holes: nothing about the answer changes.
+        student = blink(led_from="a21")
+        elsewhere = Netlist(
+            components=[
+                mcu(D2="j40", GND="j50"),
+                part("R1", "resistor", "j40", "j45", ohms=330),
+                part("L1", "led", "j45", "j50", color="red"),
+            ]
+        )
+        told = [(f.kind, f.components, f.suggestion) for f in check(student, elsewhere)]
+        assert told == [
+            (f.kind, f.components, f.suggestion) for f in check(student, blink())
+        ]
+
+    def test_a_wire_one_hole_off_is_moved_back_not_the_part_it_missed(self):
+        # Both moves are one hole. A wire's end is the gentler thing to move.
+        student = _example("basicboard_as_built")
+        student["W_blue"].pins["2"] = Pin("a33")
+        [found] = check(student, _example("basicboard_demo"))
+        assert found.components == ("W_blue",)
+        assert found.suggestion == "Move it from a33 to a32."
+
+    def test_a_wire_end_far_from_home_is_moved_back_not_a_part_dragged_to_it(self):
+        # Carrying the part's own leg to the pin's strip also makes the circuits
+        # match, and is a shorter move, but it leaves the wire joining nothing
+        # and asks the student to stretch a part across the board.
+        lab = _example("activity3")
+        student = _example("activity3")
+        home = student["W_ground"].pins["1"].hole
+        student["W_ground"].pins["1"] = Pin("j55")
+        [found] = check(student, lab)
+        assert found.components == ("W_ground",)
+        assert found.suggestion == f"Move it from j55 to {home}."
+
+        student = _example("basicboard_as_built")
+        student["W_blue"].pins["1"] = Pin("a20")  # off pin 4's strip, far away
+        [found] = check(student, _example("basicboard_demo"))
+        assert found.components == ("W_blue",)
+        assert found.suggestion == "Move it from a20 to a54."
+
+    def test_a_build_with_no_places_that_differs_is_not_crashed_on(self):
+        lab = _example("basicboard_demo")
+        other = _example("basicboard_demo")
+        white, blue = other["LED_white"], other["LED_blue"]
+        white.pins["anode"], blue.pins["anode"] = blue.pins["anode"], white.pins["anode"]
+        assert kinds(check(other, lab)) == ["circuit_differs"]
+
+    def test_a_circuit_with_no_places_checks_clean_against_itself(self):
+        lab = _example("basicboard_demo")
+        assert check(lab, lab) == []
+
+
 class TestWires:
     def test_a_build_using_jumpers_the_lab_drawing_does_not_is_the_same_circuit(self):
         # The demo board reaches every pin, and ground, through jumper wires;

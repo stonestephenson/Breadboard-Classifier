@@ -96,11 +96,23 @@ the caller can phrase them differently ("did you mean to move this?" versus a la
 
 ### Choosing between equally valid repairs
 
-Several single moves often fix the same break. With a resistor ending at a20 and an LED starting
-at a21, moving either closes the gap — but the resistor is exactly where the lab puts it, so the
-LED is what actually moved. Every working repair is collected and then ranked, preferring to move
-a leg that sits somewhere the lab never mentions, then the shortest move. Returning the first
-repair found instead blames whichever component happened to come first in the list.
+Several single moves often fix the same break. With a wire ending in a33 and an LED's leg in a32,
+moving either closes the gap, and nothing says which one the student misplaced. Every working
+repair is collected and then ranked. A repair that leaves a wire joining nothing comes last: when
+a wire's end has strayed far, carrying the part's own leg to where the wire should have gone also
+makes the circuits match, but it strands the wire and stretches the part across the board. Then
+the shortest move, since one hole off is the commonest slip, then a wire's end before a part's
+leg, since a wire is the easier thing to move. Returning the first repair found instead blames
+whichever component happened to come first in the list.
+
+### The lab has no places
+
+Placement is free, so a lab can only say which legs are joined, never where. A lab file can be
+written that way: each leg on a named net, `{"net": "white"}`, instead of in a hole
+(`examples/basicboard_demo.json`). A correct build can also serve as the lab. Either way the
+checker uses only the circuit. Where a lab's own file puts things is never looked at: not as
+places to try moving a leg to, and not to decide which of two equal repairs to suggest. (It once
+was, on the idea that the lab is a reference build. The holes in a lab file are made up.)
 
 ## Validated against real hardware
 

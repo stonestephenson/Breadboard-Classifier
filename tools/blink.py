@@ -431,6 +431,11 @@ def judge(
         return verify(lab, session, pins)
     try:
         described = Netlist.from_json(json.loads(build.read_text()))
+        if any(not p.placed for c in described for p in c.pins.values()):
+            raise NetlistError(
+                "a build needs every leg in a hole; this file puts legs on nets, "
+                "as a lab does"
+            )
     except (OSError, ValueError, NetlistError, KeyError, TypeError, AttributeError) as e:
         # A hand-edited file can be malformed in any shape; say so, don't crash.
         return Verdict(

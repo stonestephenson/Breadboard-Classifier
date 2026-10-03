@@ -58,6 +58,39 @@ class TestPin:
         with pytest.raises(NetlistError):
             Pin("z99")
 
+    def test_a_leg_may_sit_on_a_net_instead_of_in_a_hole(self):
+        # How a lab is written: which legs are joined, never where.
+        a, b, other = Pin("net:white"), Pin("net:white"), Pin("net:GND")
+        assert not a.placed and Pin("b24").placed
+        assert a.node == b.node != other.node
+        assert a.node != Pin("b24").node
+
+    def test_a_net_is_written_as_a_net_not_as_a_hole(self):
+        assert Pin("net:white").to_json() == {"net": "white"}
+        assert Pin.from_json({"net": "white"}) == Pin("net:white")
+
+    def test_a_place_that_is_not_text_is_rejected_not_crashed_on(self):
+        # A hand-edited file can hold anything.
+        for bad in (12, None):
+            with pytest.raises(NetlistError):
+                Pin(bad)  # pyright: ignore[reportArgumentType]
+        with pytest.raises(NetlistError):
+            Pin.from_json({"net": None})
+
+    def test_spaces_round_a_nets_name_do_not_make_it_another_net(self):
+        assert Pin("net: white ").node == Pin("net:white").node
+        assert Pin.from_json({"net": " white"}).to_json() == {"net": "white"}
+
+    def test_a_leg_on_a_net_has_no_reading_to_doubt(self):
+        with pytest.raises(NetlistError):
+            Pin("net:white", confidence=0.5)
+
+    def test_a_net_needs_a_name_and_cannot_be_a_guess_at_a_hole(self):
+        with pytest.raises(NetlistError):
+            Pin("net:")
+        with pytest.raises(NetlistError):
+            Pin("b24", confidence=0.5, alternatives=("net:white",))
+
     def test_rejects_an_impossible_alternative(self):
         with pytest.raises(NetlistError):
             Pin("b24", alternatives=("nope",))
@@ -130,6 +163,22 @@ class TestComponent:
                 type=ctype,
                 attrs={"direction": direction},
                 pins={names[0]: Pin("b24"), names[1]: Pin("b28")},
+            )
+
+
+class TestNets:
+    def test_a_net_with_one_leg_on_it_is_a_spelling_mistake(self):
+        # "whtie" joins nothing, and every correct build would then look wrong.
+        with pytest.raises(NetlistError, match="whtie"):
+            Netlist(
+                components=[
+                    Component(id="MCU", type="mcu", pins={"D2": Pin("net:D2")}),
+                    Component(
+                        id="R1",
+                        type="resistor",
+                        pins={"1": Pin("net:D2"), "2": Pin("net:whtie")},
+                    ),
+                ]
             )
 
 

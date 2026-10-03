@@ -423,44 +423,53 @@ def _single_pin_repair(student: Netlist, reference: Netlist) -> Finding | None:
     """Find the endpoint that, moved, makes the circuit correct.
 
     Several different single moves often fix the same break, and they are not
-    equally useful to a student. With a resistor ending at a20 and an LED
-    starting at a21, moving either one closes the gap -- but the resistor is
-    exactly where the lab puts it, so the LED is the part that actually moved.
+    equally useful to a student. With a wire ending in a33 and an LED's leg in
+    a32, moving either one closes the gap. Nothing says which of them the
+    student put in the wrong hole: placement is free, so the lab has no places
+    to compare with (where its own file puts things means nothing, and is never
+    looked at).
 
-    So every working repair is collected and then ranked, preferring to move a
-    leg that sits somewhere the lab never mentions, and preferring the shortest
-    move. Returning the first repair found instead would blame whichever
-    component happened to come first in the list.
+    So every working repair is collected and then ranked. A repair that leaves
+    a wire joining nothing comes last: when a wire's end has strayed, carrying
+    the part's own leg all the way to where the wire should have gone also makes
+    the circuits match, but it strands the wire and stretches the part across
+    the board. Then the shortest move, since one hole off is the commonest slip;
+    then a wire's end before a part's leg, since a wire is the easier thing to
+    move and moving it leaves the part as it sits. Returning the first repair
+    found instead would blame whichever component happened to come first in
+    the list.
     """
-    targets = _candidate_holes(student, reference)
-    ref_holes = {p.hole for c in reference for p in c.pins.values()}
+    targets = _candidate_holes(student)
 
     repairs = []
     for comp in student:
         if comp.type == "mcu":
             continue
         for pin_name, pin in comp.pins.items():
+            if not pin.placed:
+                continue  # a leg on a net is in no hole, so it cannot be moved
             for hole in targets:
                 if hole == pin.hole:
                     continue
                 trial = deepcopy(student)
                 trial[comp.id].pins[pin_name] = Pin(hole)
                 if equivalent(trial, reference):
-                    repairs.append((comp, pin_name, pin, hole))
+                    repairs.append((comp, pin_name, pin, hole, _stray_wires(trial)))
 
     if not repairs:
         return None
 
     def rank(r):
-        comp, pin_name, pin, hole = r
+        comp, pin_name, pin, hole, stray = r
         return (
-            pin.hole in ref_holes,  # a leg the lab never mentions moved
+            stray,
             _hole_distance(pin.hole, hole),
+            comp.type != "wire",
             comp.id,
             pin_name,
         )
 
-    comp, pin_name, pin, hole = min(repairs, key=rank)
+    comp, pin_name, pin, hole, _ = min(repairs, key=rank)
     nice = _nearest_hole_in_same_row(pin.hole, hole)
     return Finding(
         kind="wrong_connection",
@@ -474,6 +483,26 @@ def _single_pin_repair(student: Netlist, reference: Netlist) -> Finding | None:
         suggestion=f"Move it from {pin.hole} to {nice}.",
         detail={"leg": pin_name, "from": pin.hole, "to": nice},
     )
+
+
+def _stray_wires(n: Netlist) -> int:
+    """How many wires join nothing: no part's leg is in either end's strip, nor
+    in any strip wired to them."""
+    parent: dict[str, str] = {}
+
+    def find(node: str) -> str:
+        parent.setdefault(node, node)
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    wires = n.of_type("wire")
+    for wire in wires:
+        a, b = (p.node for p in wire.ordered_pins())
+        parent[find(a)] = find(b)
+    held = {find(p.node) for c in n if c.type != "wire" for p in c.pins.values()}
+    return sum(find(wire.ordered_pins()[0].node) not in held for wire in wires)
 
 
 def _hole_distance(a: str, b: str) -> float:
@@ -554,14 +583,15 @@ def _pin_swap_repair(student: Netlist, reference: Netlist) -> Finding | None:
     return None
 
 
-def _candidate_holes(student: Netlist, reference: Netlist) -> list[str]:
+def _candidate_holes(student: Netlist) -> list[str]:
     """Holes worth trying as a repair target.
 
-    Every hole already in use by either circuit, plus the immediate neighbours
-    of the student's own holes -- because the error we most expect is an
-    endpoint one column off.
+    Every hole the student's circuit already uses, plus their immediate
+    neighbours -- because the error we most expect is an endpoint one column
+    off. A repair has to join the leg to something on the board, so nowhere
+    else can help. The lab's own file adds nothing: it has no places.
     """
-    holes = {p.hole for n in (student, reference) for c in n for p in c.pins.values()}
+    holes = {p.hole for c in student for p in c.pins.values() if p.placed}
     for hole in list(holes):
         where, index = parse_hole(hole)  # every hole in a netlist is already valid
         if where in ROWS:

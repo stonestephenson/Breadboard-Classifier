@@ -54,7 +54,7 @@ The others are worth running to see the behaviours that matter most:
 | `basicboard_no_resistor.json` | Caught with **no lab file at all** (`check` without `--lab`) |
 | `basicboard_dead_rail.json` | The unpowered half of a split power rail. The kit's own board turned out to have continuous rails (`board.RAILS_SPLIT`), so this only applies to a split-rail board |
 | `basicboard_rewired.json` | Not a mistake: the BasicBoard as rewired on 2026-09-27 (pin 2 green, 3 blue, 4 white, 5 red) |
-| `basicboard_demo.json` | The lab for the live demo board, rebuilt 2026-09-29: pin 3 white, 4 blue, 5 green, 6 red |
+| `basicboard_demo.json` | The lab for the live demo board, rebuilt 2026-09-29: pin 3 white, 4 blue, 5 green, 6 red. Written as a pure circuit: each leg on a named net (`{"net": "white"}`), no holes, because a lab cannot say where things go |
 | `basicboard_as_built.json` | That demo board as built, every leg in its hole, as a person described it |
 | `basicboard_as_seen.json` | The same, but not which way round each LED is, which a camera cannot see: the file a vision model will one day produce |
 

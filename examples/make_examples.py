@@ -29,7 +29,7 @@ REWIRED = [
     ("D4", "white", 28),
     ("D5", "red", 36),
 ]
-MCU_COL = {"D2": 44, "D3": 46, "D4": 48, "D5": 50, "D6": 52}
+MCU_COL = {"D2": 44, "D3": 46, "D4": 48, "D5": 50}
 GND_COL = 58
 
 
@@ -65,11 +65,40 @@ def basicboard_rewired() -> Netlist:
 
 # The demo lab (2026-09-29): pin 3 white, 4 blue, 5 green, 6 red, each through a
 # resistor to ground. It is what Stone's demo board below was built to do.
-DEMO = [("D3", "white", 12), ("D4", "blue", 20), ("D5", "green", 28), ("D6", "red", 36)]
+DEMO = [("D3", "white"), ("D4", "blue"), ("D5", "green"), ("D6", "red")]
+
+
+def lab_circuit(leds, name: str) -> Netlist:
+    """A lab as it really is: which legs are joined, and nothing about where.
+
+    Each leg sits on a named net instead of in a hole. Placement is free, so a
+    lab that named holes would be inventing them.
+    """
+    pins = {pin: Pin(f"net:{pin}") for pin, _ in leds}
+    pins["GND"] = Pin("net:GND")
+    parts: list[Component] = [
+        Component(id="MCU", type="mcu", origin="factory", pins=pins)
+    ]
+    for pin, colour in leds:
+        parts += [
+            Component(
+                id=f"R_{colour}",
+                type="resistor",
+                attrs={"ohms": 330},
+                pins={"1": Pin(f"net:{pin}"), "2": Pin(f"net:{colour}")},
+            ),
+            Component(
+                id=f"LED_{colour}",
+                type="led",
+                attrs={"color": colour},
+                pins={"anode": Pin(f"net:{colour}"), "cathode": Pin("net:GND")},
+            ),
+        ]
+    return Netlist(name=name, components=parts)
 
 
 def basicboard_demo() -> Netlist:
-    return basicboard(DEMO, "basicboard (demo lab 2026-09-29)")
+    return lab_circuit(DEMO, "basicboard (demo lab 2026-09-29)")
 
 
 # Stone's demo board as built on 2026-09-29, as Stone described it and blinking

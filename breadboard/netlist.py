@@ -14,6 +14,12 @@ Four things travel together on every pin:
 The last two exist so the checker can distinguish *the student made a mistake*
 from *I misread the photo*. Without them a blurry frame becomes a false
 accusation, which for a 13-year-old is the worst failure this system has.
+
+A lab is a Netlist too, but it has no places. Placement is free, so a lab can
+only say which legs are joined, never where. Its legs sit on named nets
+("net:white") instead of in holes: legs naming the same net are joined. A
+correct build may also serve as the lab; either way the checker uses only the
+circuit, never where the lab's own file happens to put things.
 """
 
 from __future__ import annotations
@@ -52,6 +58,10 @@ COMPONENT_TYPES: dict[str, tuple[tuple[str, ...], bool]] = {
 # labelled vertex.
 TWO_TERMINAL = {t for t, (pins, _) in COMPONENT_TYPES.items() if len(pins) == 2}
 
+# A leg on a net rather than in a hole is written "net:<name>" (see the module
+# docstring). Its node is "N:<name>", which no hole's node can be.
+NET = "net:"
+
 # An LED's attrs may say {"direction": "unknown"}: which way round it is was not
 # seen. A camera cannot tell once the LED is seated (its legs are hidden), so a
 # vision model's netlist says this, and its anode and cathode are just its two
@@ -66,15 +76,23 @@ class NetlistError(ValueError):
 
 @dataclass(frozen=True)
 class Pin:
-    """One leg of a component, in one hole."""
+    """One leg of a component: in one hole, or, in a lab, on a named net."""
 
     hole: str
     confidence: float = 1.0
     alternatives: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        if not isinstance(self.hole, str):
+            raise NetlistError(f"a leg's place must be text, got {self.hole!r}")
         try:
-            node_of(self.hole)
+            if self.placed:
+                node_of(self.hole)
+            elif not self.net:
+                raise NetlistError(f"a net needs a name after {NET!r}")
+            elif self.alternatives or self.confidence != 1.0:
+                # Doubt is about a reading of the board. A net was never read.
+                raise NetlistError(f"a leg on net {self.net!r} cannot carry doubt")
             for alt in self.alternatives:
                 node_of(alt)
         except BoardError as e:
@@ -85,8 +103,18 @@ class Pin:
             )
 
     @property
+    def placed(self) -> bool:
+        """False for a leg on a net, which is in no hole."""
+        return not self.hole.startswith(NET)
+
+    @property
+    def net(self) -> str | None:
+        """The net's name for a leg on a net, None for a leg in a hole."""
+        return None if self.placed else self.hole[len(NET) :].strip()
+
+    @property
     def node(self) -> str:
-        return node_of(self.hole)
+        return node_of(self.hole) if self.placed else f"N:{self.net}"
 
     @property
     def alternative_nodes(self) -> tuple[str, ...]:
@@ -102,6 +130,8 @@ class Pin:
         return tuple(out)
 
     def to_json(self) -> dict[str, Any]:
+        if not self.placed:
+            return {"net": self.net}
         d: dict[str, Any] = {"hole": self.hole}
         if self.confidence != 1.0:
             d["confidence"] = self.confidence
@@ -113,6 +143,10 @@ class Pin:
     def from_json(cls, d: Any) -> Pin:
         if isinstance(d, str):  # bare hole string is a valid shorthand
             return cls(d)
+        if "net" in d:
+            if not isinstance(d["net"], str):
+                raise NetlistError(f"a net's name must be text, got {d['net']!r}")
+            return cls(f"{NET}{d['net']}")
         return cls(
             hole=d["hole"],
             confidence=d.get("confidence", 1.0),
@@ -219,6 +253,20 @@ class Netlist:
             if c.id in seen:
                 raise NetlistError(f"duplicate component id {c.id!r}")
             seen.add(c.id)
+        # A net joins legs. One with a single leg on it joins nothing, which in a
+        # hand-written lab means a misspelt name, and would make every correct
+        # build look wrong.
+        legs: dict[str, int] = {}
+        for c in self.components:
+            for p in c.pins.values():
+                if p.net is not None:
+                    legs[p.net] = legs.get(p.net, 0) + 1
+        alone = sorted(name for name, count in legs.items() if count == 1)
+        if alone:
+            raise NetlistError(
+                f"only one leg is on net {alone[0]!r}; a net joins legs, so check "
+                "its spelling"
+            )
 
     def __getitem__(self, cid: str) -> Component:
         for c in self.components:
