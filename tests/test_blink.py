@@ -88,6 +88,22 @@ class TestFindGlow:
         assert glow.column == 30
         assert glow.colour == "green"
 
+    def test_a_red_streak_beside_a_blue_led_does_not_make_it_white(self):
+        # A red wire's edge, where the two photos are a little out of line:
+        # enough red on average to pass for white, but all in one streak.
+        off = _board()
+        blue = _light(off, HOLES["c30"], spill_rgb=(0, 60, 200))
+        x, y = (round(v) for v in HOLES["c30"])
+        streaked = blue.copy()
+        streaked[y - 46 : y - 43, x - 50 : x + 50, 0] += 100
+        assert find_glow(2, blue, off, FLAT).colour == "blue"
+        assert find_glow(2, streaked, off, FLAT).colour == "unknown"
+
+    def test_a_white_led_with_little_green_is_still_white(self):
+        off = _board()
+        on = _light(off, HOLES["c30"], spill_rgb=(20, 70, 200))
+        assert find_glow(2, on, off, FLAT).colour == "white"
+
     def test_no_change_is_dark(self):
         off = _board()
         assert find_glow(2, off.copy(), off, FLAT).status == "dark"
@@ -157,7 +173,9 @@ class TestGlowColour:
     # These are the measurements the thresholds were set from, so this guards
     # against regressions; it does not prove the thresholds generalise. The
     # third white (7, 88, 187) is the closest call: 3.7% red, against 2% to be
-    # called white and 1% to be called blue.
+    # called white and 1% to be called blue. The last four are from a laptop
+    # camera (2026-10-02), which darkened its picture so much for the white LED
+    # that its spill kept only 35% green, less than some blue LEDs' spills.
     @pytest.mark.parametrize(
         ("increase", "name"),
         [
@@ -181,20 +199,30 @@ class TestGlowColour:
             ((0, 28, 171), "blue"),
             ((83, 107, 152), "white"),
             ((146, 9, 0), "red"),
+            ((5, 36, 103), "white"),
+            ((0, 36, 118), "blue"),
+            ((0, 76, 10), "green"),
+            ((136, 16, 3), "red"),
         ],
     )
     def test_measured_spills_get_their_led_colour(self, increase, name):
         assert glow_colour(np.array(increase)) == name
 
-    @pytest.mark.parametrize(
-        "increase",
-        [
-            (10, 50, 200),  # some red, but not the green a white LED adds
-            (3, 100, 200),  # too much red for blue, too little for white
-        ],
-    )
-    def test_between_blue_and_white_it_does_not_guess(self, increase):
-        assert glow_colour(np.array(increase)) == "unknown"
+    def test_between_blue_and_white_it_does_not_guess(self):
+        # Too much red for blue, too little for white.
+        assert glow_colour(np.array((3, 100, 200))) == "unknown"
+
+    def test_green_does_not_decide_between_blue_and_white(self):
+        # A camera that darkens for the LED hides a white LED's green, and a
+        # dim room gives a blue LED's spill plenty. Red is what tells them.
+        assert glow_colour(np.array((10, 50, 200))) == "white"
+        assert glow_colour(np.array((0, 120, 196))) == "blue"
+
+    def test_red_in_one_patch_of_a_blue_glow_is_not_white(self):
+        # Enough red on average, but in 3% of the glow: a red wire's edge where
+        # the photos are a little out of line. Real white LEDs: 16% and up.
+        assert glow_colour(np.array((10, 50, 200)), red_spread=0.03) == "unknown"
+        assert glow_colour(np.array((10, 50, 200)), red_spread=0.16) == "white"
 
     def test_no_spill_has_no_colour(self):
         assert glow_colour(np.zeros(3)) == "unknown"
@@ -768,6 +796,16 @@ LEDS = {
         3: ("blue", 25),
         4: ("white", 19),
         5: ("red", 15),
+    },
+    # The demo board (rebuilt 2026-09-29: pin 3 white, 4 blue, 5 green, 6 red),
+    # held up to a laptop's own camera, in front of a red shirt, with red wires
+    # beside the LEDs. That camera darkens much more for a lit LED than the
+    # phone, and its white LED was first read as "unknown".
+    "basicboard-2026-10-02-laptop": {
+        3: ("white", 27),
+        4: ("blue", 31),
+        5: ("green", 38),
+        6: ("red", 44),
     },
 }
 # Pins that may be set aside rather than judged. In handheld-4, the white LED

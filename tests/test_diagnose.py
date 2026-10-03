@@ -523,6 +523,12 @@ class TestRecordedRun:
         assert verdict.works, verdict.findings
         assert any("which way round" in n for n in verdict.notes)
 
+    def test_the_board_works_on_a_laptop_camera_too(self):
+        # 2026-10-02: first said "Not sure yet", the white LED's colour unknown.
+        session = self._session("basicboard-2026-10-02-laptop")
+        verdict = diagnose(basicboard_as_seen(), LAB, session, PINS)
+        assert verdict.works, verdict.findings
+
     def test_a_flipped_led_a_camera_cannot_see_gets_turn_it_around(self):
         session = self._session("basicboard-2026-09-29-demo-flipped")
         verdict = diagnose(basicboard_as_seen(), LAB, session, PINS)

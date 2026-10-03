@@ -84,6 +84,23 @@ SPILL_BAND = (1.5, 3.0)
 # about as much as its surroundings. So a glint that coincides with the whole
 # board brightening by this much would pass.)
 MIN_SPILL = 60.0
+# Blue or white is told by red (glow_colour). In every recorded run a blue LED's
+# spill gained at most 0.5% as much red as blue, and a white one's 3.7-63%.
+# Why blue shows none: both cameras tried (a phone, a laptop) darken the picture
+# when a blue LED lights, so red around it falls, and a fall counts as nothing.
+# Sliding the lit photo up to half a pitch out of line raised a blue LED's red
+# to 1.4% at most. A camera that did not darken (exposure locked, or the board
+# small in a bright room) would leave less margin: there, a blue LED's photos a
+# third of a pitch out of line could read as white. Not seen; simulated only.
+BLUE_MAX_RED = 0.01
+WHITE_MIN_RED = 0.02
+# That red must also be spread through the glow, not sit in one streak. Counted
+# over the spill's pixels that gained at least GLOW_LEVELS of blue, a blue LED
+# had red in at most 2.2% of them, and a white one in 16-100% (16-20% on the
+# laptop camera, 25% and up on the phone). This stops a single stray streak. It
+# does not stop photos out of line, whose red shows at every hole's edge.
+MIN_RED_SPREAD = 0.08
+GLOW_LEVELS = 30
 # Photos are lined up at this scale, for speed; the result is sub-pixel anyway.
 ALIGN_SCALE = 0.5
 # Refining stops when the match improves by less than this per step. At 1e-4 it
@@ -182,29 +199,40 @@ def photo_pitch(rect: Rectification) -> float:
     return float(np.hypot(x2 - x1, y2 - y1)) / 62
 
 
-def glow_colour(increase: np.ndarray) -> str:
+def glow_colour(increase: np.ndarray, red_spread: float | None = None) -> str:
     """A coarse colour name for the mean RGB brightness increase in the spill.
 
     Measured SPILL_BAND pitches from the core. Single-colour LEDs give almost
     nothing in the channel opposite their own. White LEDs are blue LEDs with a
-    phosphor coat, so their spill still peaks in blue. In seven recorded runs a
-    blue LED added 0-0.1% as much red as blue, and a white one 3.5-54% (the camera
-    darkening its exposure for the white LED can hide most of its red). White
-    also adds more green: 47-79% as much as blue, where a blue LED added 10-29%
-    in a lit room but 61% in a dim one. So white needs some red and plenty of
-    green; blue needs no red; anything else is "unknown" rather than a guess. On
-    camera, green LEDs spill cyan-ish light that peaks in green. Only red, green,
-    blue and white have been seen on camera; the yellow and orange cut-offs are
-    guesses.
+    phosphor coat, so their spill still peaks in blue, and what tells them from
+    blue is red: a blue LED adds none (BLUE_MAX_RED), a white one always some
+    (WHITE_MIN_RED). In between is "unknown" rather than a guess.
+
+    How much red and green a white LED shows depends on the camera. When the LED
+    comes on, the camera darkens its picture, and that takes away red and green
+    the room was giving; a laptop camera cut the red far from the LED by half,
+    leaving the white LED's spill 5% red and 35% green beside its blue, where a
+    phone showed 6-63% and 47-85%. Green cannot tell white from blue at all: a
+    blue LED's spill was 7-61% green over the same runs. So green is not used.
+
+    red_spread is the share of the glow's pixels that gained red (find_glow
+    measures it). White needs it to be at least MIN_RED_SPREAD, so that one
+    streak of stray red beside a blue LED is not taken for white. None means it
+    was not measured, and the mean alone decides.
+
+    On camera, green LEDs spill cyan-ish light that peaks in green. Only red,
+    green, blue and white have been seen on camera; the yellow and orange
+    cut-offs are guesses.
     """
     r, g, b = (float(v) for v in increase)
     top = max(r, g, b)
     if top < 1.0:
         return "unknown"
     if top == b:
-        if r / b <= 0.01:
+        if r / b <= BLUE_MAX_RED:
             return "blue"
-        return "white" if r / b >= 0.02 and g / b >= 0.42 else "unknown"
+        spread = red_spread is None or red_spread >= MIN_RED_SPREAD
+        return "white" if r / b >= WHITE_MIN_RED and spread else "unknown"
     if top == g:
         return "white" if min(r, b) / g >= 0.5 else "green"
     if min(g, b) / r >= 0.5:
@@ -212,6 +240,15 @@ def glow_colour(increase: np.ndarray) -> str:
     if g / r > 0.75:
         return "yellow"
     return "orange" if g / r > 0.45 else "red"
+
+
+def _red_spread(increase: np.ndarray) -> float:
+    """The share of the spill's pixels that gained red beside their blue, among
+    those the glow clearly reached. increase is one row of RGB gain per pixel."""
+    reached = increase[increase[:, 2] >= GLOW_LEVELS]
+    if not len(reached):
+        return 0.0
+    return float((reached[:, 0] > WHITE_MIN_RED * reached[:, 2]).mean())
 
 
 def find_glow(
@@ -275,7 +312,7 @@ def find_glow(
         "lit",
         hole=rect.hole_at((x, y)),
         photo_xy=(x, y),
-        colour=glow_colour(spill),
+        colour=glow_colour(spill, _red_spread(increase)),
         core_px=size,
     )
 
