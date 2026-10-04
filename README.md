@@ -42,7 +42,7 @@ Now break something:
 # x wrong_connection   [baseline]
 #   One leg of the blue LED is in the wrong place, so this part of the circuit is not joined up.
 #   at j37
-#   -> Move it from j37 to j36.
+#   -> Move it from j37 to i36.
 ```
 
 The others are worth running to see the behaviours that matter most:
@@ -125,8 +125,9 @@ which leg to move. That file describes the board as built, standing in for the v
 will one day read it from the photo; edit it to match the board and check again. It is trusted
 only where blinking confirms it. If light comes from somewhere it does not predict, the answer
 says the entered parts don't match the board, and shows no fix. Otherwise it goes in two steps.
-First, is every part in the right place? If not, the fix down to the hole ("Move it from d33 to
-d32"), drawn on the photo. Then, for an LED placed right that stayed dark, the causes no picture
+First, is every part in the right place? If not, the fix down to the hole ("Move it from a33 to
+a32"), drawn on the photo. Up to three fixes are named in one check, each confirmed by its own
+pin, and two wires on each other's pins are said as one swap. Then, for an LED placed right that stayed dark, the causes no picture
 shows, one per check, most likely first: it is the wrong way round, a leg is not pushed in, the
 LED is broken, and last, ask your teacher. `tools/live.py` remembers between checks, and says
 "Fixed since the last check" when the LED lights.

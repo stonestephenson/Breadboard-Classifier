@@ -44,7 +44,7 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 
 from breadboard.blink import Glow, Session
-from breadboard.board import BoardError, is_rail, parse_hole
+from breadboard.board import BoardError, is_rail, node_of, parse_hole
 from breadboard.check import Finding, check
 from breadboard.graph import build as build_graph
 from breadboard.graph import wires_joined
@@ -492,8 +492,18 @@ def diagnose(
             "not say."
         )
 
-    fixes = [_confirmed_or_not(f, build, session, pins) for f in check(build, lab)]
-    hidden = [] if fixes else hidden_causes(build, lab, session, pins, previous)
+    found = check(build, lab)
+    explained = _explained_pins(build, pins, found)
+    named = {c for f in found for c in f.components}
+    fixes = [_confirmed_or_not(f, build, session, pins) for f in found]
+    # An LED placed right but dark gets its hidden cause even while another LED
+    # has something to move. Not an LED a fix concerns: for that one, the part
+    # to move comes first, and may be why it is dark.
+    hidden = [
+        f
+        for f in hidden_causes(build, lab, session, pins, previous)
+        if f.detail["pin"] not in explained and not named & set(f.components)
+    ]
     if not fixes and not hidden:
         return replace(measured, notes=tuple(notes))
     dark = {f.detail["pin"] for f in hidden}
@@ -501,21 +511,17 @@ def diagnose(
         f
         for f in measured.findings
         if not (f.kind == "led_does_not_light" and f.detail.get("pin") in dark)
+        and not (f.kind in _EXPLAINED_BY_FIXES and f.detail.get("pin") in explained)
     ]
-    if fixes:
-        explained = _explained_pins(build, lab, pins, fixes)
-        kept = [
-            f
-            for f in kept
-            if not (f.kind in _EXPLAINED_BY_FIXES and f.detail.get("pin") in explained)
-        ]
     findings = [*fixes, *hidden, *kept]
     order = {"error": 0, "warning": 1, "uncertain": 2}
     findings.sort(key=lambda f: order.get(f.severity, 3))
-    # "In the right place" only when nothing is to be moved (no fixes, since
-    # hidden causes need none) and nothing else is wrong; doubts may remain.
-    if hidden and all(
-        f.kind == "hidden_fault" or f.severity == "uncertain" for f in findings
+    # "In the right place" only when the checker has nothing to move at all, and
+    # nothing else is wrong; doubts may remain.
+    if (
+        hidden
+        and not fixes
+        and all(f.kind == "hidden_fault" or f.severity == "uncertain" for f in findings)
     ):
         leds = _leds([build[f.components[0]].attrs.get("color") for f in hidden])
         summary = f"Everything looks in the right place, but {leds} did not light."
@@ -531,23 +537,74 @@ _EXPLAINED_BY_FIXES = frozenset(
 )
 
 
+def _pins_touched(build: Netlist, fix: Finding, pins: Sequence[int]) -> set[int]:
+    """The pins whose paths the fix's parts sit on, or are sent to.
+
+    A pin counts when a strip one of those parts has a leg in, or is told to
+    move a leg to, can be reached from the pin without passing ground or power.
+    A fix may put one pin's link right by moving a part that sits on another
+    pin's path, and then both pins have to have been seen clearly.
+    """
+    graph = build_graph(build)
+    links: dict[str, list[str]] = {}
+    wired: dict[str, list[str]] = {}
+    for e in graph.edges:
+        links.setdefault(e.a, []).append(e.b)
+        links.setdefault(e.b, []).append(e.a)
+        if all(item.type == "wire" for item in e.items):
+            wired.setdefault(e.a, []).append(e.b)
+            wired.setdefault(e.b, []).append(e.a)
+    # Ground and power, with every strip a wire joins to them (the rails).
+    supplies = {n for n, names in graph.labels.items() if names & _SUPPLIES}
+    todo = list(supplies)
+    while todo:
+        for other in wired.get(todo.pop(), ()):
+            if other not in supplies:
+                supplies.add(other)
+                todo.append(other)
+    for part in graph.parts:
+        nodes = [node for _, node in part.pins]
+        for a in nodes:
+            links.setdefault(a, []).extend(b for b in nodes if b != a)
+    ids = {c.id for c in build}
+    where = {
+        p.node for cid in fix.components if cid in ids for p in build[cid].pins.values()
+    }
+    for hole in (fix.detail.get("to"), *fix.detail.get("legs", {}).values()):
+        if hole:
+            where.add(node_of(hole))
+    where -= supplies
+    out = set()
+    for pin in pins:
+        todo = [n for n, names in graph.labels.items() if f"D{pin}" in names]
+        seen = set(todo)
+        while todo:
+            for other in links.get(todo.pop(), ()):
+                if other not in seen and other not in supplies:
+                    seen.add(other)
+                    todo.append(other)
+        if seen & where:
+            out.add(pin)
+    return out
+
+
+def _fix_pins(fix: Finding) -> list[int]:
+    """The digital pins whose links the checker says this fix puts right."""
+    names = fix.detail.get("pins", ())
+    return [int(n[1:]) for n in names if n.startswith("D") and n[1:].isdigit()]
+
+
 def _explained_pins(
-    build: Netlist, lab: Netlist, pins: Sequence[int], fixes: Sequence[Finding]
+    build: Netlist, pins: Sequence[int], fixes: Sequence[Finding]
 ) -> set[int]:
-    """Pins whose trouble the fixes account for: the description does not place
-    the lab's LED to light from them, or a fix names the LED it does place. A
-    pin whose LED is placed right, and named by no fix, is not explained by a
-    fix elsewhere, so what blinking found there is still said."""
-    expected, _ = expected_leds(lab)
+    """Pins whose trouble the fixes account for: a fix puts that pin's link
+    right, or names the LED the description puts on it. What blinking found on
+    any other pin is still said, a fix elsewhere notwithstanding. So is
+    everything it found when the checker could name no fix at all."""
     named = {c for f in fixes for c in f.components}
-    said = claims(build, pins)
-    out = set(pins) - set(said)  # no claim: nothing says the LED is placed right
-    for pin, claim in said.items():
-        want = expected.get(pin)
-        placed = (
-            want is not None and claim.lights and _same_colour(want.colour, claim.colour)
-        )
-        if not placed or claim.component in named:
+    out = {pin for f in fixes for pin in _fix_pins(f)}
+    for pin, claim in claims(build, pins).items():
+        if claim.component in named:
             out.add(pin)
     return out
 
@@ -567,15 +624,19 @@ def _confirmed_or_not(
     fix: Finding, build: Netlist, session: Session, pins: Sequence[int]
 ) -> Finding:
     """The fix as is if blinking clearly saw the pins it concerns, else offered
-    as not yet confirmed. Its pins are those of the LEDs it names; a fix naming
-    no LED needs every pin the description makes a claim about to be clear. A
-    fix concerning one pin says which (detail "pin")."""
+    as not yet confirmed. Its pins are those whose links the checker says it
+    puts right, and those whose paths its parts sit on; failing both, those of
+    the LEDs it names. A fix with none needs every pin the description makes a
+    claim about to be clear. A fix concerning one pin says which (detail
+    "pin")."""
     if fix.severity != "error":
         return fix
-    expected, untestable = expected_leds(build)
-    pin_of = {e.component: pin for pin, e in expected.items()}
-    pin_of.update({u.component: u.pin for u in untestable if u.pin is not None})
-    concerned = [pin_of[c] for c in fix.components if c in pin_of]
+    concerned = sorted({*_fix_pins(fix), *_pins_touched(build, fix, pins)})
+    if not concerned:
+        expected, untestable = expected_leds(build)
+        pin_of = {e.component: pin for pin, e in expected.items()}
+        pin_of.update({u.component: u.pin for u in untestable if u.pin is not None})
+        concerned = [pin_of[c] for c in fix.components if c in pin_of]
     if len(set(concerned)) == 1:
         fix = replace(fix, detail={**fix.detail, "pin": concerned[0]})
     if not concerned:

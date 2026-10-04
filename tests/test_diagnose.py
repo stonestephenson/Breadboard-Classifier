@@ -410,10 +410,15 @@ class TestHiddenCausesReview:
         assert "led_does_not_light" not in kinds  # the fix says it better
 
     def test_a_possible_misplaced_leg_is_not_in_the_right_place(self):
+        # Green's wire may be off (pin 5 was unclear, so that is unconfirmed).
+        # Blue, a different LED, still gets its hidden cause (since 2026-10-03
+        # each fix answers for its own pin), but nothing says "all in place".
         run = _run(**{**AS_BUILT_RUN, "p4": "dark", "p5": "unclear"})
         verdict = diagnose(_built(J_green={"1": "i36"}), LAB, run, PINS)
         assert "right place" not in verdict.summary
-        assert "hidden_fault" not in _kinds(verdict)
+        assert _hidden(verdict).detail["pin"] == 4
+        [fix] = [f for f in verdict.findings if f.kind == "wrong_connection"]
+        assert fix.severity == "uncertain"
 
     def test_a_dark_led_placed_right_is_still_said_beside_a_fix_elsewhere(self):
         # The green wire's fix does not explain why the blue LED is dark.
@@ -428,6 +433,62 @@ class TestHiddenCausesReview:
         run = Session(RECT, glows, shorted=frozenset({7}))
         verdict = diagnose(_built(), LAB, run, PINS)
         assert "hidden_fault" in _kinds(verdict)
+        assert "right place" not in verdict.summary
+
+
+GREEN_OFF = {"W_green": {"2": "a39"}}
+
+
+class TestSeveralThingsWrong:
+    """Each fix answers for its own pin, so several can be said in one check."""
+
+    def test_a_wire_fix_and_another_leds_hidden_cause_come_together(self):
+        # Green's wire is a hole off. Blue is placed right but loose. Neither
+        # hides the other.
+        run = _run(**{**AS_BUILT_RUN, "p4": "dark", "p5": "dark"})
+        verdict = diagnose(_built(**GREEN_OFF), LAB, run, PINS)
+        assert sorted(_kinds(verdict)) == ["hidden_fault", "wrong_connection"]
+        assert _hidden(verdict).detail["pin"] == 4
+        assert "right place" not in verdict.summary
+
+    def test_each_fix_is_confirmed_by_its_own_pin(self):
+        # Blinking clearly saw pin 5 dark, but could not judge pin 4.
+        run = _run(**{**AS_BUILT_RUN, "p4": "unclear", "p5": "dark"})
+        verdict = diagnose(_built(**GREEN_OFF, **FLIPPED_BLUE), LAB, run, PINS)
+        by_kind = {f.kind: f for f in verdict.findings}
+        assert by_kind["wrong_connection"].severity == "error"
+        assert by_kind["reversed_polarity"].severity == "uncertain"
+        assert by_kind["reversed_polarity"].message.startswith("Not yet confirmed")
+
+    def test_a_fix_needs_every_pin_its_part_sits_on_to_be_clear(self):
+        # Both ground jumpers are in the + rail. Blinking saw pin 3 dark, but
+        # could not judge pin 4. Whatever is said about the blue LED's jumper,
+        # which is on pin 4's path, is not yet confirmed.
+        build = _built(J_white={"2": "p2+:22"}, J_blue={"2": "p2+:25"})
+        run = _run(**{**AS_BUILT_RUN, "p3": "dark", "p4": "unclear"})
+        verdict = diagnose(build, LAB, run, PINS)
+        about_blue = [f for f in verdict.findings if "J_blue" in f.components]
+        assert about_blue and all(f.severity == "uncertain" for f in about_blue)
+
+    def test_swapped_wires_get_the_swap_not_blinkings_vaguer_words(self):
+        build = _built(W_white={"1": "a54"}, W_blue={"1": "a53"})
+        run = _run(**{**AS_BUILT_RUN, "p3": ("blue", 32), "p4": ("white", 28)})
+        verdict = diagnose(build, LAB, run, PINS)
+        assert _kinds(verdict) == ["swapped_connections"]
+        assert verdict.findings[0].severity == "error"
+
+    def test_when_no_fix_is_found_what_blinking_saw_is_still_said(self):
+        # The wire from pin 4 is missing altogether, which no change the checker
+        # knows can mend. The measured fact must not be dropped with it.
+        build = _built()
+        build.components = [c for c in build.components if c.id != "W_blue"]
+        run = _run(**{**AS_BUILT_RUN, "p4": "dark"})
+        kinds = _kinds(diagnose(build, LAB, run, PINS))
+        assert "circuit_differs" in kinds and "led_does_not_light" in kinds
+
+    def test_a_fix_for_one_led_does_not_claim_everything_else_is_placed_right(self):
+        run = _run(**{**AS_BUILT_RUN, "p4": "dark", "p5": "unclear"})
+        verdict = diagnose(_built(**GREEN_OFF), LAB, run, PINS)
         assert "right place" not in verdict.summary
 
 

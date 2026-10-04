@@ -1,7 +1,7 @@
 # The circuit model and checker
 
 The reasoning half of the system: given a circuit, decide whether it is right and — if not —
-what one change would fix it. Deterministic and fully tested; no model, no camera, no hardware.
+which changes would fix it. Deterministic and fully tested; no model, no camera, no hardware.
 
 Four modules under `breadboard/`, each usable on its own:
 
@@ -85,10 +85,53 @@ Needing the lab's intended circuit:
 |------|---------|
 | `uncertain_reading` | A near-miss reading would make this correct; ask for a better view |
 | `wrong_connection` | One leg is in the wrong place; names where it is and where it goes |
+| `swapped_connections` | Two legs, usually two wire ends, need to swap places |
 | `reversed_polarity` | A polarised part is in backwards |
 | `extra_component` | A part the lab does not use |
 | `missing_component` | A part the lab needs that is absent |
-| `circuit_differs` | Differs, and no single change explains it |
+| `circuit_differs` | Differs, and the search found no run of changes that ends at the lab's circuit; or, as a caution after three fixes, more follow |
+
+### Several mistakes at once
+
+No single change fixes a circuit with two mistakes in it, so the search does not ask for one. It
+scores the student's circuit by how much of the lab's it has. For each lab link between two named
+pins: two points for each of its parts that hangs, one after another, off the right pin at either
+end (one if that part is an LED the wrong way round), and two more when the link is whole. For a
+sensor: two points for each leg on the right named point. Then it takes the single change that
+raises the score most, makes it, and looks again, until the circuits match. A change that makes
+them match outright always wins, so one mistake gets exactly the answer a search for a single fix
+would give. A broken chain scores for each piece still in place, so two breaks in one LED's path
+are mended one at a time, as is a wire off plus an LED backwards.
+
+Fixes are passed on only when the whole run of them ends at the lab's circuit. A run that stalls
+short of it says nothing, however far it got, because a step can raise the score and still be the
+wrong thing to do. (A cold review found exactly that in a third of stalled runs.) At most three
+fixes are shown, the first ones made, with a note that more follow.
+
+Each fix records which pins' links it put right (`detail["pins"]`), so a caller with
+measurements can check each fix against its own pins (`diagnose.py`). Two moves that send each
+leg to where the other was are said once, as a swap. Two fixes to one part are said once too:
+"The blue LED is in the wrong holes. Put its longer leg in d32 and its shorter leg in d31."
+
+A part counts for one link only. The parts of a link that is whole are that link's, so a working
+LED's resistor is not taken for the one a broken LED lacks.
+
+Only moves a student could make are tried. A wire's end can go anywhere. An LED's leg stays
+within four holes of its other leg, and a resistor's within twenty; a leg may always move a
+little further than the part spans now, since the example circuits are drawn wider than real
+parts. A sensor's legs are one rigid row, so none moves alone. Without this the search would
+stretch an LED across the board to meet a wire that strayed.
+
+Limits: missing or extra parts are reported first and stop the search. A missing wire cannot be
+suggested: nothing here adds a part. Two changes that only help together give no first step:
+both ends of one wire in the wrong place, or two wires that both join the same two pins. A lab link through a junction that
+carries no Metro Mini pin cannot be scored on its own, so such a lab gets a fix only when one
+change makes the whole circuit match.
+
+### Where a moved leg is sent
+
+The suggestion names a hole with no leg in it, in the right strip: the leg's own row if that hole
+is free ("from a33 to a32"), otherwise the nearest free one.
 
 **`scope`** is `"lab"` for parts the student was asked to place and `"baseline"` for the
 factory-wired BasicBoard. Both are reported — a knocked-loose factory LED is a real problem — but
@@ -124,11 +167,12 @@ colour.
 
 ## What is not built yet
 
-- **No lab reference circuits.** Waiting on the curriculum PDFs (`docs/OPEN_QUESTIONS.md` Q4).
-  Authoring 7 of these is a bounded content task; an authoring tool would help.
-- **Multi-terminal parts (`sensor3`, `sensor4`) exist in the netlist but not in the graph.** Only
-  two-terminal parts become edges today. Sensors need to become labelled vertices before any lab
-  using them can be checked.
+- **Lab circuits for the remaining activities.** The demo board, the BasicBoard as shipped and
+  Activity 3 are written; the curriculum's two design-challenge activities are not. A lab file
+  here must name each pin, so a lab that leaves the choice of pin to the student cannot be
+  written yet.
+- **No fix that adds a part.** A wire the student left out is not suggested; the answer falls back
+  to "no single change found" and what blinking saw.
 - **No natural-language rendering.** Findings carry a `message`, but turning a set of findings
   into a paragraph for a student is a separate layer.
 - **Nothing produces a Netlist yet from a photo.** The probe produces pin connectivity; wiring

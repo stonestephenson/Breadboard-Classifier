@@ -120,6 +120,11 @@ def _all_holes() -> list[str]:
 ALL_HOLES: tuple[str, ...] = tuple(_all_holes())
 
 
+def holes_of(node: str) -> list[str]:
+    """Every hole that belongs to a node, in board order."""
+    return [hole for hole in ALL_HOLES if node_of(hole) == node]
+
+
 def is_rail(node: str) -> bool:
     return node.startswith("R:")
 
