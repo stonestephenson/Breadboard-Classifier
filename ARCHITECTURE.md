@@ -161,7 +161,8 @@ checks pass: the holes fit the template, the rail stripes confirm which end is c
 fitted column beats the same fit shifted by a column or two. A fit that fails any of them makes
 the caller abstain rather than read holes from it.
 
-Still open: live webcam frames, and a success rate over all 248 photos rather than a sample.
+Live webcam frames work (`tools/live.py`). Still open: a success rate over all 248 photos rather
+than a sample.
 
 *Original spike (2026-08-06), for the record:* our own lattice fit reached 0.02–0.06 pitch
 residual where it locked on, against a half-pitch requirement. But it fitted only 8 of 12 photos,
@@ -278,6 +279,11 @@ building a full Netlist, because blinking cannot see legs or resistors.
 **Stage B — if it fails, what is the smallest fix?** Compute the minimum edit against whichever
 valid arrangement is closest to what the student actually built. The edit *is* the diagnosis:
 "move this one connection from here to there" rather than "wrong".
+
+*As built: `breadboard/check.py`.* The lab is one circuit, written with no places, and a build
+matches it when the two are the same up to which strip is which (`graph.py`). The edit is found
+by a scored search that makes one change at a time, names up to three, and only when they end at
+the lab's circuit. `docs/CHECKER.md` is the accurate account of both.
 
 *Demo form (2026-09-29): `breadboard/diagnose.py`.* Until the model exists, a person describes the
 build in a circuit file, the same file the model will produce. That description is inference-grade,

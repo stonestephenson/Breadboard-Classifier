@@ -10,14 +10,14 @@ Part of Sonoma State's Learning by Making / STEMACES program.
 ## Setup
 
 ```bash
-python -m venv venv
+python3 -m venv venv
 ./venv/bin/pip install -e ".[dev]"
 ./.claude/verify.sh          # lint, format, types, tests — should print PASS
 ```
 
 ## Try it
 
-Twelve example circuits live in `examples/`. The BasicBoard ones are built from its **measured**
+The example circuits live in `examples/`. The BasicBoard ones are built from its **measured**
 topology (pin 2 drives the red LED, 3 white, 4 green, 5 blue — recovered over USB, not assumed);
 the Activity 3 ones come from the curriculum worksheet.
 
@@ -99,11 +99,11 @@ Plug a Metro Mini in over USB (a **data** cable, not charge-only):
 
 ```bash
 ./venv/bin/python tools/blink.py --camera 1           # the camera that sees the board
-# pin  2  green LED at column 29
-# pin  3  blue LED at column 25
-# pin  4  white LED at column 19
-# pin  5  red LED at column 15
-# pins 6-10  nothing lit
+# pin  3  white LED at column 27
+# pin  4  blue LED at column 32
+# pin  5  green LED at column 38
+# pin  6  red LED at column 44
+# pins 2, 7-10  nothing lit
 ./venv/bin/python tools/blink.py --replay data/cache/blink/<run>   # re-judge a saved run
 ./venv/bin/python tools/blink.py --camera 1 --lab examples/basicboard_demo.json
 # Every LED lights from the right pin, so your wiring works. ...
@@ -177,7 +177,8 @@ the column is ambiguous. Then the answer is "take a better photo". The first run
 
 The rectifier is
 [breadboard-normalizer](https://github.com/hartleyblakey/breadboard-normalizer) (MIT), vendored in
-`breadboard/_vendor/` (credits and local changes in its `__init__.py`). Its corner model is
+`breadboard/_vendor/` (credits and local changes in
+`breadboard/_vendor/breadboard_normalizer/__init__.py`). Its corner model is
 [DocAligner](https://github.com/DocsaidLab/DocAligner) (Apache 2.0). Results and how it compares
 with our earlier attempt: [docs/SPIKE_RECTIFY.md](docs/SPIKE_RECTIFY.md).
 
@@ -193,7 +194,7 @@ with our earlier attempt: [docs/SPIKE_RECTIFY.md](docs/SPIKE_RECTIFY.md).
 | Photo → circuit | **Not started.** Needs training data. A hand-written file stands in for it. |
 | Probe → circuit | **Not started.** Blinking gives per-pin facts instead. |
 | Activity 3 reference circuit | **Done**, from the worksheet. |
-| Activities 1, 4, 5 references | Not authored yet. |
+| The other activities' reference circuits | Not authored yet. |
 
 **For LED labs the loop is closed, except for one step.** A check blinks each LED, compares what
 lit with the lab, and, given a description of the build, names the leg to move. Only that
@@ -219,6 +220,8 @@ breadboard/     the circuit model and checker — deterministic, fully tested
   check.py      diagnosis: findings with a repair a student can carry out
   rectify.py    find the board in a photo; map holes between photo and board
   blink.py      find each LED from a camera watching its pin switch on
+  verify.py     does it work? what each pin lit, against the lab
+  diagnose.py   which leg to move: a described build, trusted where blinking agrees
   cli.py        python -m breadboard
   _vendor/      the vendored breadboard-normalizer, kept in upstream style
 tools/probe.py  measure a real board over USB

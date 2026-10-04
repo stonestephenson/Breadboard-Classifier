@@ -1,8 +1,9 @@
 """The netlist: what a circuit *is*, independent of how we learned about it.
 
-This is the contract between the two halves of the system. The electrical probe
-(`tools/probe.py`) and the camera pipeline both produce a Netlist; the checker
-(`breadboard/check.py`) consumes one. Neither side needs to know about the other.
+This is the contract between the two halves of the system. Whatever describes a
+build produces a Netlist (today a hand-written file, one day the camera
+pipeline); the checker (`breadboard/check.py`) consumes one. Neither side needs
+to know about the other.
 
 Four things travel together on every pin:
 

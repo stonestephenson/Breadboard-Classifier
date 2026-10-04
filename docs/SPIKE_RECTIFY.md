@@ -58,7 +58,7 @@ alone does not guarantee a usable fit:
 
 `Rectification.ok` requires all three. When it is False, the result must not be read.
 
-**Not yet tested:** live webcam frames (upstream's README shows a webcam demo working), and the
+Live webcam frames have since been tried and work (`tools/live.py`). **Not yet tested:** the
 full 248-photo set. `spikes/lattice_fit.py` stays as a record of this spike; nothing depends
 on it.
 

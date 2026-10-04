@@ -13,10 +13,13 @@ Talks straight to the board over USB, so it needs nothing from the LbyM web app.
     ./venv/bin/python tools/probe.py --port /dev/cu.usbmodem1101
     ./venv/bin/python tools/probe.py --blink 4       # flash pin 4 (see the LED)
 
-SAFETY. Driving a pin LOW while the student's circuit ties it to +5V would short
-the output driver. Before scanning, every pin is read with pull-ups OFF; a pin
-that still reads HIGH is externally driven and is never driven low. Only one pin
-is driven at a time, and the original pin state is restored on exit.
+SAFETY. Driving a pin LOW while the student's circuit ties it to +5V shorts the
+output driver. The scan does not know that in advance: it drives each pin low
+for about 5 ms with every other pin on its pull-up, and a pin that still reads
+HIGH while driven low is released at once and reported as a conflict. A pin
+already low at rest is not driven. Only one pin is driven at a time, and the
+original pin state is restored on exit. (Blinking, tools/blink.py, drives pins
+high, one at a time, through Board.drive_only, and has its own safety notes.)
 """
 
 from __future__ import annotations

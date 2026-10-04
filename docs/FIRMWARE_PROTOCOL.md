@@ -87,7 +87,12 @@ Standard pin-to-pin continuity scan:
    - restore *P* to INPUT_PULLUP.
 3. The result is a full connectivity matrix over the Arduino's pins — *measured*, not inferred.
 
-~13 probe pins × ~5 transactions ≈ 65 commands ≈ well under a second.
+18 probe pins (every pin but D0/D1) × ~5 transactions ≈ 90 commands ≈ well under a second.
+
+As implemented (`tools/probe.py`), the resting state is read first and subtracted: a pin the
+circuit already ties low reads low whatever is driven, so only a pin that was high at rest and
+went low counts as joined. A pin that stays high while driven low is being forced up by the
+circuit; it is released at once and reported as a conflict.
 
 ### analogRead makes it richer than continuity
 
@@ -127,7 +132,11 @@ pin readings in this state cannot prove a wire between two pins, and nothing cla
 
 ## Caveats and reserved pins
 
-| Pin(s) | Why hands off |
+Only D0/D1 are masked by our tools (`RESERVED` in `tools/probe.py`). The other rows are pins the
+sketch uses for its sensors: blinking drives D2–D10, so with an ultrasonic sensor on D10 a check
+would trigger it, which is harmless.
+
+| Pin(s) | Why to take care |
 |--------|---------------|
 | **D0 / D1** | RX/TX for the USB serial link. Touching `DDRD` bits 0–1 kills our own connection. **Mask them in every write.** |
 | **D10 / D11** | Ultrasonic trigger / echo (`ping.h`). |

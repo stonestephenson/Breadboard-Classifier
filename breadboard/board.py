@@ -151,8 +151,9 @@ def same_rail_different_segment(a: str, b: str) -> bool:
 def hole_position(hole: str) -> tuple[float, float]:
     """Physical position in millimetres from the board's top-left hole.
 
-    Used to convert between the checker's world and the rectified image, and to
-    express "move it one column left" as a real distance.
+    Used for distances: how far a leg would move, and whether a part could
+    reach. Column 1 is at x = 0 here. The rectified image (rectify.py) has its
+    own frame, in pixels, with column 1 on the right.
     """
     where, index = parse_hole(hole)
     if where in ROWS:

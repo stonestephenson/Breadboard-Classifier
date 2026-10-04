@@ -3,7 +3,9 @@
 The reasoning half of the system: given a circuit, decide whether it is right and — if not —
 which changes would fix it. Deterministic and fully tested; no model, no camera, no hardware.
 
-Four modules under `breadboard/`, each usable on its own:
+Four modules under `breadboard/`, each usable on its own (the camera side, `rectify.py`,
+`blink.py`, `verify.py` and `diagnose.py`, is described in their docstrings and
+`ARCHITECTURE.md`):
 
 | Module | Responsibility |
 |--------|---------------|
@@ -12,7 +14,8 @@ Four modules under `breadboard/`, each usable on its own:
 | `graph.py` | Topology, and deciding when two circuits are the same one |
 | `check.py` | Diagnosis: findings with a repair a student can carry out |
 
-Run the tests with `./venv/bin/python -m pytest tests/ -q` — 109 currently, ~0.6s.
+Run the tests with `./venv/bin/python -m pytest tests/ -q` (about two minutes with the local
+photos and recordings; see "Test data" in `CLAUDE.md`).
 
 ## The two facts the board model encodes
 
@@ -122,8 +125,9 @@ little further than the part spans now, since the example circuits are drawn wid
 parts. A sensor's legs are one rigid row, so none moves alone. Without this the search would
 stretch an LED across the board to meet a wire that strayed.
 
-Limits: missing or extra parts are reported first and stop the search. A missing wire cannot be
-suggested: nothing here adds a part. Two changes that only help together give no first step:
+Limits: missing or extra parts are reported first and stop the search. A missing wire is only
+reported when the lab's own file has more wires than the build; otherwise nothing here adds a
+part, so a wire the student left out is not suggested. Two changes that only help together give no first step:
 both ends of one wire in the wrong place, or two wires that both join the same two pins. A lab link through a junction that
 carries no Metro Mini pin cannot be scored on its own, so such a lab gets a fix only when one
 change makes the whole circuit match.
@@ -157,6 +161,52 @@ checker uses only the circuit. Where a lab's own file puts things is never looke
 places to try moving a leg to, and not to decide which of two equal repairs to suggest. (It once
 was, on the idea that the lab is a reference build. The holes in a lab file are made up.)
 
+## Findings and data flow
+
+One check runs through these modules, each handing the next a plain data structure:
+
+| Step | Module | Hands on |
+|------|--------|----------|
+| Find the board, name its holes | `rectify.py` | a `Rectification` (photo pixel to hole and back) |
+| Blink each pin, see what lit | `blink.py` | a `Session`: one `Glow` per pin, pins set aside, pins tied to ground |
+| Does it work? | `verify.py` | a `Verdict` of findings, against the lab's `Netlist` |
+| The build, as described | a circuit file | a `Netlist` (every leg in a hole) |
+| Trust it? What to move? Hidden causes? | `diagnose.py`, using `check.py` and `graph.py` | a `Verdict` |
+| Draw and print it | `tools/blink.py` (`draw_verdict`), `tools/live.py` | the picture |
+
+Wires are made into joins before anything is compared (`graph.wires_joined`): two strips a wire
+connects are one point.
+
+Every stage speaks in `Finding`s (`check.py`). The kinds above come from the checker. The others:
+
+| Kind | From | Meaning |
+|------|------|---------|
+| `led_does_not_light`, `wrong_led_on_pin`, `unexpected_led` | `verify.py` | What a pin lit differs from the lab |
+| `pin_tied_to_ground` | `verify.py` | The pin read low when driven, and was released |
+| `not_checked`, `cannot_check`, `board_not_found`, `imperfect_view` | `verify.py` | Doubt: unclear photos, an LED blinking cannot test, no board, a poor fit |
+| `entry_mismatch` | `diagnose.py` | Light where the described build predicts none; no fix is shown |
+| `hidden_fault` | `diagnose.py` | Placed right but dark: the next cause to try |
+| `entry_unreadable` | `tools/blink.py` | The build file could not be read, or is written like a lab |
+
+`Finding.detail` carries what later stages need. Its keys:
+
+| Key | Meaning |
+|-----|---------|
+| `pin` | The Metro Mini digital pin the finding is about, as an int |
+| `pins` | Names (`"D4"`, `"A0"`) of the pins whose links a checker fix puts right |
+| `glow` | The pin whose lit LED to ring on the photo |
+| `leg`, `from`, `to` | One leg moved: its name, its hole, the free hole to send it to |
+| `legs` | A whole part re-placed: each leg's hole |
+| `swapped` | The two holes (or two sensor legs) to exchange |
+| `step` | Which hidden cause was suggested (`diagnose.HIDDEN_CAUSES`) |
+| `type` | The part's type |
+| `seen`, `reason`, `read_as`, `might_be`, `confidence` | What was observed, for messages |
+
+Pins are ints in `blink.py`, `verify.py` and `diagnose.py`, and names like `"D4"` in a `Netlist`.
+A circuit file's parts take `attrs`: `color` (LED), `ohms` (resistor), `kind` (sensor), and
+`direction: "unknown"` (an LED whose way round was not seen). A leg is `{"hole": "d31"}` or, in
+a lab, `{"net": "white"}`.
+
 ## Validated against real hardware
 
 `tests/test_basicboard.py` builds the BasicBoard's measured topology — pin 2 → red, 3 → white,
@@ -171,8 +221,9 @@ colour.
   Activity 3 are written; the curriculum's two design-challenge activities are not. A lab file
   here must name each pin, so a lab that leaves the choice of pin to the student cannot be
   written yet.
-- **No fix that adds a part.** A wire the student left out is not suggested; the answer falls back
-  to "no single change found" and what blinking saw.
+- **No fix that adds a part.** A wire the student left out is not suggested (unless the lab's
+  file itself has more wires than the build); the answer falls back to "could not work out what
+  to change" and what blinking saw.
 - **No natural-language rendering.** Findings carry a `message`, but turning a set of findings
   into a paragraph for a student is a separate layer.
 - **Nothing produces a Netlist yet from a photo.** The probe produces pin connectivity; wiring
