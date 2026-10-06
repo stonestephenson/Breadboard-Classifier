@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING
 import cv2
 import numpy as np
 
+from breadboard.blink import too_bright
 from breadboard.rectify import (
     MIN_COLUMN_MARGIN,
     Rectification,
@@ -73,8 +74,13 @@ STALL_SECONDS = 3.0
 CORNER_HOLES = ("a1", "j1", "a63", "j63")
 
 
-def verdict(rect: Rectification | None) -> tuple[bool, str]:
-    """Whether the fit is usable, and what to tell the person holding the camera."""
+def verdict(
+    rect: Rectification | None, frame: np.ndarray | None = None
+) -> tuple[bool, str]:
+    """Whether the fit is usable, and what to tell the person holding the camera.
+
+    Given the frame too, a board found but washed out is said to be too bright,
+    since a check would then judge nothing (breadboard.blink.too_bright)."""
     if rect is None:
         return False, "No board in view - get the whole board in the picture"
     if rect.confidence == 0.0:
@@ -83,6 +89,8 @@ def verdict(rect: Rectification | None) -> tuple[bool, str]:
         return False, "Can't read the rail stripes - which end is column 1?"
     if rect.column_margin < MIN_COLUMN_MARGIN:
         return False, "Can't pin down the columns - get both ends of the board in view"
+    if frame is not None and too_bright(frame, rect):
+        return False, "Too bright - move the board out of direct light"
     grade = "" if rect.confidence == 1.0 else " (imperfect fit)"
     return True, f"Board found: all 830 holes located{grade}"
 
@@ -90,7 +98,7 @@ def verdict(rect: Rectification | None) -> tuple[bool, str]:
 def annotate(frame: np.ndarray, rect: Rectification | None) -> np.ndarray:
     """The camera frame (RGB) with holes marked and the verdict across the top."""
     out = draw_holes(frame, rect, CORNER_HOLES) if rect is not None else frame.copy()
-    ok, message = verdict(rect)
+    ok, message = verdict(rect, frame)
     return banner(out, message, GOOD if ok else BAD)
 
 

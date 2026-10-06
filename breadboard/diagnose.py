@@ -467,7 +467,7 @@ def diagnose(
     """
     previous = previous or {}
     measured = verify(lab, session, pins)
-    if session.rect is None:
+    if session.rect is None or session.too_bright:
         return measured
     expected, _ = expected_leds(lab)
     notes = [

@@ -270,6 +270,34 @@ class TestVerify:
         assert not verdict.works
         assert [f.kind for f in verdict.findings] == ["board_not_found"]
 
+    def test_changing_light_on_pins_nothing_should_be_on_does_not_block_works(self):
+        # The room's light kept changing: pins 6 and 7 showed no LED, but not
+        # cleanly enough to be called dark, and no differently from each other
+        # (calm). The lab puts nothing there, so that is quiet enough.
+        note = "the board changed, but no LED core showed"
+        unclear = {p: Glow(p, "unclear", note) for p in (6, 7)}
+        run = _session(AS_BUILT, glows=unclear, calm=frozenset({6, 7}))
+        assert verify(BASICBOARD, run, PINS).works
+
+    def test_changing_light_on_a_pin_with_an_led_is_not_taken_for_a_dark_led(self):
+        # The same on pin 3, where the lab has an LED: it is neither passed nor
+        # said to be broken.
+        lit = {p: c for p, c in AS_BUILT.items() if p != 3}
+        unclear = {3: Glow(3, "unclear", "the board changed, but no LED core showed")}
+        run = _session(lit, glows=unclear, calm=frozenset({3}))
+        verdict = verify(BASICBOARD, run, PINS)
+        assert not verdict.works
+        kinds = [(f.kind, f.severity) for f in verdict.findings]
+        assert kinds == [("not_checked", "uncertain")]
+
+    def test_a_washed_out_board_asks_for_less_light_and_blames_nothing(self):
+        # Nothing was judged, so no LED is said to be dark, and nothing works.
+        verdict = verify(BASICBOARD, Session(_fit(), too_bright=True), PINS)
+        assert not verdict.works
+        assert [f.kind for f in verdict.findings] == ["too_bright"]
+        assert verdict.findings[0].severity == "uncertain"
+        assert "light" in (verdict.findings[0].suggestion or "")
+
     def test_a_lab_without_leds_says_so(self):
         verdict = verify(_lab("activity3"), _session({}), PINS)
         assert not verdict.works

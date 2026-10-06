@@ -64,7 +64,11 @@ from breadboard.diagnose import Suggested, diagnose
 from breadboard.netlist import Netlist, NetlistError
 from breadboard.verify import Verdict, verify
 
-SETTLE_S = 0.6  # after switching, let the LED and the camera's exposure settle
+# After switching, let the LED and the camera's exposure settle. A phone has by
+# then. One laptop camera needs about a second after a bright LED goes off, so
+# its unlit photos are up to 20 levels dark; blink.py's glow measure allows for
+# that. The alignment limits there were measured at this value and go with it.
+SETTLE_S = 0.6
 SAMPLES = 6  # frames averaged per photo, to beat sensor noise
 SESSIONS = Path("data/cache/blink")
 
@@ -206,7 +210,9 @@ def load_attempts(run: Path) -> list[Attempt]:
 def report(session: Session, pins: list[int]) -> list[str]:
     if session.rect is None:
         return ["Could not find the board in any frame. Nothing was judged."]
-    lines, dark = [], []
+    if session.too_bright:
+        return ["The board is washed out in the picture. Nothing was judged."]
+    lines, dark, calm = [], [], []
     for pin in pins:
         glow = session.glows.get(pin)
         if pin in session.shorted:
@@ -217,12 +223,19 @@ def report(session: Session, pins: list[int]) -> list[str]:
             lines.append(f"pin {pin:>2}  not judged: no pictures")
         elif glow.status == "lit":
             lines.append(f"pin {pin:>2}  {glow.colour} LED at column {glow.column}")
+        elif pin in session.calm:
+            calm.append(pin)
         elif glow.status == "unclear":
             lines.append(f"pin {pin:>2}  unclear: {glow.note}. Check it by eye.")
         else:
             dark.append(pin)
     if dark:
         lines.append(f"pin{'s' if len(dark) > 1 else ''} {_ranges(dark)}  nothing lit")
+    if calm:
+        lines.append(
+            f"pin{'s' if len(calm) > 1 else ''} {_ranges(calm)}  no LED showed, "
+            "but the room's light kept changing"
+        )
     return lines
 
 
@@ -500,7 +513,7 @@ def main() -> int:
     print(f"\nframes   {run}\npicture  {picture}")
     if verdict is not None:
         return 0 if verdict.works else 1
-    return 0 if session.rect is not None else 1
+    return 0 if session.rect is not None and not session.too_bright else 1
 
 
 if __name__ == "__main__":

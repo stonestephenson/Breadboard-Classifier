@@ -196,6 +196,16 @@ class TestDiagnose:
         assert not verdict.works
         assert [f.kind for f in verdict.findings] == ["board_not_found"]
 
+    def test_a_washed_out_board_is_the_whole_answer(self):
+        # Nothing was judged, so the description is neither trusted nor doubted,
+        # and no leg is said to be in the wrong place.
+        # The build described has the blue LED in backwards, which the checker
+        # would name; but nothing was seen, so nothing is said about it.
+        washed = Session(RECT, too_bright=True)
+        verdict = diagnose(_built(**FLIPPED_BLUE), LAB, washed, PINS)
+        assert not verdict.works
+        assert [f.kind for f in verdict.findings] == ["too_bright"]
+
     def test_a_description_contradicted_elsewhere_gets_no_hidden_causes(self):
         run = _run(**{**AS_BUILT_RUN, "p4": "dark", "p7": ("red", 50)})
         verdict = diagnose(_built(), LAB, run, PINS)
@@ -599,6 +609,21 @@ class TestRecordedRun:
     def test_the_board_works_on_a_laptop_camera_too(self):
         # 2026-10-02: first said "Not sure yet", the white LED's colour unknown.
         session = self._session("basicboard-2026-10-02-laptop")
+        verdict = diagnose(basicboard_as_seen(), LAB, session, PINS)
+        assert verdict.works, verdict.findings
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "basicboard-2026-10-05-laptop-bright",
+            "basicboard-2026-10-05-laptop-cycling-2",
+        ],
+    )
+    def test_the_board_works_whatever_the_light_did(self, name):
+        # 2026-10-05, both "Not sure yet" when recorded: still, with the board
+        # at 190 of 255; then with a screen saver throwing a new colour of light
+        # over the board every second.
+        session = self._session(name)
         verdict = diagnose(basicboard_as_seen(), LAB, session, PINS)
         assert verdict.works, verdict.findings
 

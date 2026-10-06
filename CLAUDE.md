@@ -23,13 +23,13 @@ Chrome on school-issued machines).
 | Circuit model + checker (`breadboard/`) | **Done**, including 3- and 4-leg sensors. Finds up to three mistakes in one check, names only fixes that end at the lab's circuit, and tries only moves a student can make. A lab is written as a circuit with no places (`{"net": "white"}`). `docs/CHECKER.md` |
 | Electrical probe (`tools/probe.py`) | **Working on real hardware.** `docs/FIRMWARE_PROTOCOL.md` |
 | Rectifier (`breadboard/rectify.py`) | **Working on real photos**, and live on a webcam (`tools/live.py`). Built on the vendored breadboard-normalizer. `docs/SPIKE_RECTIFY.md` |
-| Blink and watch (`breadboard/blink.py`, `tools/blink.py`) | **Working on the real board**, on a phone camera and one laptop camera. Each LED found by its pin, colour and column, no trained model. A pin set aside because the board moved is blinked again. |
+| Blink and watch (`breadboard/blink.py`, `tools/blink.py`) | **Working on the real board**, on a phone camera and one laptop camera. Each LED found by its pin, colour and column, no trained model. The bar for a glow is set by each check's own photos in which nothing lit, above a small fixed floor, so a bright room or changing light does not change the answer. A pin set aside because the board moved is blinked again. |
 | Does it work? (`breadboard/verify.py`) | **Working.** Blink results checked against a lab file: findings plus a verdict drawn on the photo. Demo: `tools/live.py --camera 1 --lab examples/basicboard_demo.json`, press `c`. |
 | Which leg to move? (`breadboard/diagnose.py`) | **Working, with the build entered by hand** in place of the vision model: `examples/basicboard_as_seen.json` (LED directions left open, as a camera must) or `basicboard_as_built.json`. Trusted only where blinking confirms it; then the checker's fix, down to the hole, is drawn on the photo. An LED placed right but dark gets its hidden causes, one per check, and "fixed" when it lights. Demo: add `--build examples/basicboard_as_seen.json`. |
 | Per-node occupancy from photos | Not started; a trained model needs data |
 | Lab reference circuits | The demo board, the BasicBoard as shipped and Activity 3 are written; the two design-challenge activities are not |
 
-Gate: `./.claude/verify.sh` (lint, format, types, tests; one to two minutes; it needs `pyright`
+Gate: `./.claude/verify.sh` (lint, format, types, tests; two to three minutes; it needs `pyright`
 on the PATH, which the dev extras do not install). Tests alone:
 `./venv/bin/python -m pytest tests/ -q`. CI (`.github/workflows/ci.yml`) runs lint and tests
 only. **Setup, every run mode and the example circuits are in `README.md`.**
@@ -58,8 +58,19 @@ in for it. The Chrome/WebSerial port waits until everything else is an MVP. In o
 4. **Show what the build file stands for.** Draw the entered parts on the photo, the ones
    blinking confirmed in green; then a demo script and a one-page explainer. The demo is for
    Stone's professor.
-5. **More cameras and rooms.** One laptop-camera recording exists; its green LED's glow measured
-   75 against `blink.MIN_SPILL` 60. A Chromebook camera is untested.
+5. **More cameras and rooms.** Two cameras so far, a phone and one laptop's own, in one home. A
+   Chromebook camera is untested. That laptop camera takes about a second to recover after a
+   bright LED goes off, longer than `SETTLE_S`, so its unlit photos are up to 20 levels dark; the
+   glow measure tolerates it, but a settle time that waits for the picture to stop changing would
+   be better and is not built.
+
+**Known gap, found 2026-10-05, not fixed.** With the board held up to the laptop camera, one
+check in eight read the green LED's colour as "unknown" and so said "Not sure yet"
+(`data/cache/blink/basicboard-2026-10-05-laptop-held-green-unknown`; it is not in `LEDS`, because
+it would fail). `find_glow` still names the peak channel from how much each channel *rose* in the
+ring (`spill`), and on a bright board that camera can leave no channel risen at all. The likely
+fix is to name it from the signed change beside the LED minus the far board, which the glow
+test already measures (`_strength`). Do this before anything else in `blink.py`.
 
 The checker's known limits are in `docs/CHECKER.md` ("What is not built yet"): no fix that adds a
 part (a missing wire), and no first step when two changes only help together.
@@ -67,7 +78,7 @@ part (a missing wire), and no first step when two changes only help together.
 ## Test data, baselines and knobs
 
 The tests on real photos and recorded blink runs need files under `data/cache/`, which is not in
-git. Without them those tests skip (about 38) and the gate still goes green, so a fresh clone and
+git. Without them those tests skip (about 58) and the gate still goes green, so a fresh clone and
 CI never exercise real data. Do not tune `blink.py` or `rectify.py` on a machine without them.
 
 - `data/cache/sample/` holds 12 photos sampled from `../breadboard_generator/data/real/`
@@ -81,6 +92,11 @@ CI never exercise real data. Do not tune `blink.py` or `rectify.py` on a machine
 - `data/cache/replay_pages/` holds the source of two published pages that replay the checker's
   recorded trials (`record.py` and two templates). They are not part of the product. Re-record
   after changing `check.py`.
+- `data/cache/blink_diag/` holds scratch scripts that measured the ranges quoted beside the
+  constants in `blink.py`. `final_measure.py` prints what the code reads on every recorded run
+  (glow, quiet samples, ring colours); `stress_fakes.py` feeds it faked glints and `stress.py
+  bright` brightened runs; `mutate.py` breaks each rule in turn and checks a test fails. Not
+  part of the product. Run them after changing a constant there.
 
 Every tunable is a module constant with its measured range in the comment beside it: the
 thresholds at the top of `breadboard/blink.py`, `MIN_COLUMN_MARGIN` in `rectify.py`, and

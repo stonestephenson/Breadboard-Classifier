@@ -18,6 +18,14 @@ white core* does: pixels saturated in every channel with the pin on, but not wit
 it off, inside the board's outline. Its centre marks the LED, and the colour of
 the spill around it names the LED's colour.
 
+Little here asks for a fixed amount of light. A room, a camera and a hand all
+change how bright a glow reads, so each check is judged against itself: the
+board around a core must change more than the board far from it, and far more
+than the same patch did in this run's photos that hold no glow (find_glow).
+White is told from blue by the colour of the lit board, not by how much any
+channel rose (glow_colour). What stays fixed are floors set between the most
+that nothing has ever read and the least that an LED has.
+
 The board may be held in a hand, so it drifts between photos. Before comparing
 them, each photo is warped onto the one the board was fitted on, lining them up
 on the board itself (align). The LED's own glow is left out when lining up a
@@ -27,14 +35,23 @@ on its own straight after (blink_and_watch), up to MAX_RETRIES times.
 
 When unsure, it says so. Each pin comes out "lit", "dark" or "unclear". Unclear
 means something changed that does not look like a single LED:
-- the board brightened with no white core (a dim LED, or the room light changed);
+- the board changed unevenly with no white core (a dim LED, or the room's
+  light changing);
 - a white spot appeared with no glow around it (a glint as the board tilts);
+- the light kept changing, too much to be sure of a glow;
 - light appeared in two places;
 - a "core" covered much of the board.
-A dark pin claims its branch is broken, so it is only reported when the board
-barely changed at all.
+A dark pin claims its branch is broken, so it is only reported when no core
+showed and no part of the board changed much more than the rest: light that
+shifted all over alike is the room's, not an LED's. And when the unlit board
+is washed out, so bright that no core could show on most of it, nothing is
+judged at all (too_bright).
 
-Limits. The LED's body stands several millimetres above the board. Where it
+Limits. An LED is found by its white core. One that lit without saturating
+the camera, and whose glow covered under about a hundredth of the board, would
+read as dark; none has been recorded on either camera tried.
+
+The LED's body stands several millimetres above the board. Where it
 appears, projected onto the board, is accurate along the board (the column), but
 not across it (the row). So results give the column, and the row is only
 approximate. That is harmless in rows a-e, which share one strip, but it cannot
@@ -64,43 +81,107 @@ MIN_CORE_PITCH2 = 0.5
 # one, a white LED in a dim room, was 15%). A lifting shadow can saturate a whole
 # near-white board.
 MAX_CORE_SHARE = 0.3
-# Another core at least this many pitches from the main one means light in two
-# places. The white LED's own bright patches sat 2.8 pitches from its centre.
+# Another core means light in two places when its centre is more than
+# SEPARATE_PITCHES from the main core's centre, or when more than SEPARATE_GAP
+# pitches of board lie between the two. Unless it is a piece of the main one: a
+# wire or a lead across an LED's flare splits pieces off it, and catches its
+# light just beside it. In three runs the five such pieces sat within half a
+# pitch of the main core and were at most 1.4% of its size where their centres
+# were far from its centre (up to 7.7 pitches, since a white LED's core can be
+# twelve pitches long). So a core that near, and under FRAGMENT_SHARE of the
+# main one's size, is not counted. A second LED's core is not that small beside
+# another LED's, except beside a white one's, where it is then missed.
 SEPARATE_PITCHES = 4.0
-# Mean brightness change over the board, 0-255, above which "no core" does not
-# mean dark. Measured on photos blurred by a pitch, so the edges left by a
-# slightly imperfect alignment do not count. Pins with an LED changed it by
-# 30-142; empty pins by under 3, hand-held too.
+SEPARATE_GAP = 1.5
+FRAGMENT_SHARE = 0.04
+# With no core, the pin is dark only if the board did not change unevenly: how
+# far each point's change is from the board's median change, 0-255, on photos
+# blurred by a pitch (_uneven). SPILL_LEVELS is for its mean over the board and
+# SPILL_PEAK for its peak. A change that is the same all over is the room's
+# light or the camera's exposure, and says nothing about an LED.
+# In steady light, pins that lit nothing had a mean of 0.2-2.8 and a peak of
+# 0.6-17. Pins with an LED: 27-91 and 82-239 (they had cores too; no LED too dim
+# to show a core has been recorded, and this is what would catch one).
 SPILL_LEVELS = 10.0
+SPILL_PEAK = 35.0
+# A pin with no core that changed unevenly is still "unclear". But when a
+# screen saver threw a new colour of light over the board every second, pins
+# that lit nothing reached a mean of 12 and a peak of 61. Such a pin is listed
+# as calm (Session.calm) when it changed no more than this many times the
+# typical no-core pin of its run (their median, mean and peak both, given at
+# least MIN_CALM of them): there, the largest was 1.7 times the median.
+CALM_OVER_TYPICAL = 2.5
+MIN_CALM = 3
 # The spill's colour is read this many pitches out from the core. Nearer in, the
 # overloaded sensor bleeds into every channel: a red LED looks orange there, and
 # a blue one picks up red and green. Seven recorded runs, still and hand-held,
 # read cleanly at this distance. Pixels still saturated there are left out.
 SPILL_BAND = (1.5, 3.0)
-# A real LED raises the board around it by 136-210 levels in its strongest
-# channel, at that distance. A white spot with no such glow is a glint; cores
-# faked by a deliberately misaligned photo had at most 14. (This is not relative
-# to the board as a whole, because in a dim room an LED lights the whole board
-# about as much as its surroundings. So a glint that coincides with the whole
-# board brightening by this much would pass.)
-MIN_SPILL = 60.0
-# Blue or white is told by red (glow_colour). In every recorded run a blue LED's
-# spill gained at most 0.5% as much red as blue, and a white one's 3.7-63%.
-# Why blue shows none: both cameras tried (a phone, a laptop) darken the picture
-# when a blue LED lights, so red around it falls, and a fall counts as nothing.
-# Sliding the lit photo up to half a pitch out of line raised a blue LED's red
-# to 1.4% at most. A camera that did not darken (exposure locked, or the board
-# small in a bright room) would leave less margin: there, a blue LED's photos a
-# third of a pitch out of line could read as white. Not seen; simulated only.
-BLUE_MAX_RED = 0.01
-WHITE_MIN_RED = 0.02
-# That red must also be spread through the glow, not sit in one streak. Counted
-# over the spill's pixels that gained at least GLOW_LEVELS of blue, a blue LED
-# had red in at most 2.2% of them, and a white one in 16-100% (16-20% on the
-# laptop camera, 25% and up on the phone). This stops a single stray streak. It
-# does not stop photos out of line, whose red shows at every hole's edge.
-MIN_RED_SPREAD = 0.08
-GLOW_LEVELS = 30
+# Is there a glow around the core, or is it a glint? The board around a real LED
+# changes, and changes more than the board far from it: with the pin on, minus
+# off, in the ring SPILL_BAND, minus the same beyond FAR_PITCHES, in whichever
+# channel differs most (_strength). Both photos are blurred by a pitch first and
+# the difference keeps its sign, so the edges two photos a little out of line
+# leave at every hole cancel instead of adding up. A fall counts as much as a
+# rise: a laptop camera crushed red from 196 to 15 around a green LED on a
+# bright board, while green itself rose by only 38. And taking away the far
+# board leaves out light that changed all over between the two photos.
+# Over 39 recorded runs (a phone and a laptop camera, still and hand-held, a
+# dim room to a board at 190 of 255, and five under a screen saver's cycling
+# colours) a real LED scored 62-186. The same ring scored at most 15 on what is
+# known to hold no glow: a pin that lit nothing, or the two unlit photos either
+# side of a lit one (under 5 for most; 15 after a white LED on a laptop camera,
+# which takes a second to recover, with the board held in a hand).
+# So a glow must clear a floor between the two (GLOW_FLOOR), and stand
+# GLOW_OVER_QUIET times above the most the same ring scored on this run's own
+# glowless photos (find_glow's quiet): its noise from the camera, the light and
+# the hand, measured rather than assumed. In steady light the floor is the
+# higher bar, or 3 x 15 = 45 in that one run, against 96 for its LED. Under the
+# cycling colours the glowless photos scored up to 14, so the bar rose to 42,
+# against 81 for the weakest LED there. That second bar earns its place: 855
+# faked cores (a pin that lit nothing, its lit photo slid a third, a half or a
+# whole pitch out of line, or a white blob painted on) were never called lit.
+# On the floor alone 15 were, all under the cycling colours with the photo a
+# whole pitch out, at the Arduino's own always-lit LED, scoring 30-62.
+GLOW_FLOOR = 30.0
+GLOW_OVER_QUIET = 3.0
+# "Far from the core" starts this many pitches out.
+FAR_PITCHES = 12.0
+# The change is measured at this scale: it is blurred by a pitch anyway.
+CHANGE_SCALE = 0.25
+# Blue or white is told by the colour of the lit board itself: its green as a
+# share of its blue, in SPILL_BAND and in these two rings further out (pitches
+# from the core). A blue LED turns the board deep blue somewhere: its purest
+# ring read 0.06-0.27 in every run. A white LED turns it pale blue everywhere:
+# 0.64-0.94 in every ring, and its rings agreed within a factor of 1.23.
+# The rings further out matter because near a blue LED the overloaded sensor
+# bleeds into every channel: on the laptop camera SPILL_BAND read 0.45-0.71
+# for a blue LED, as pale as a white one, and 0.06-0.17 at 6-10 pitches.
+# (How much each channel *rose* cannot tell them. That camera crushes red and
+# green wherever a lit LED's colour dominates, a white one's too, so a white
+# LED's red rose by 1.8-5% of its blue and a blue one's by up to 1.7%.)
+# White needs all three rings read, agreeing within FLAT, and none further out
+# paler than the first by more than PALER_OUT (white LEDs: 1.04 at most). Where
+# a blue LED does not dominate the room's light, or a glow does not reach, the
+# board reads paler the further out it is, since less of the light there is
+# the LED's. Both cameras darkened and recoloured their picture enough that
+# this never showed. A camera that did neither would show it, and then the
+# answer is "unknown". It could still call a blue LED white, if blue clipped
+# evenly through all three rings; that has not been seen, and is not ruled out.
+COLOUR_ZONES = ((3.0, 6.0), (6.0, 10.0))
+# A ring with less unsaturated board than this, in square pitches, is not read
+# (an LED at the board's end, or a glow that saturates the ring).
+MIN_ZONE_PITCH2 = 8.0
+BLUE_MAX_GREEN = 0.36
+WHITE_MIN_GREEN = 0.48
+FLAT = 1.35
+PALER_OUT = 1.1
+# The unlit board is washed out when more than this share of it is at WAS_BELOW
+# or above in every channel: nothing there can turn "newly" white, so an LED
+# could light and show no core. The brightest boards recorded had 18%, and
+# every LED on them was found. The limit itself is a judgement; no washed-out
+# board has been recorded.
+MAX_BRIGHT_SHARE = 0.5
 # Photos are lined up at this scale, for speed; the result is sub-pixel anyway.
 ALIGN_SCALE = 0.5
 # Refining stops when the match improves by less than this per step. At 1e-4 it
@@ -145,6 +226,9 @@ OUTPUT_PINS = tuple(range(2, 11))
 MAX_RETRIES = 2
 
 Status = Literal["lit", "dark", "unclear"]
+# A pin's two photos as the fitted photo sees them, on then off, and a mask of
+# where both saw the board.
+Views = tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
 @dataclass(frozen=True)
@@ -199,26 +283,22 @@ def photo_pitch(rect: Rectification) -> float:
     return float(np.hypot(x2 - x1, y2 - y1)) / 62
 
 
-def glow_colour(increase: np.ndarray, red_spread: float | None = None) -> str:
-    """A coarse colour name for the mean RGB brightness increase in the spill.
+def glow_colour(increase: np.ndarray, pale: Sequence[float] = ()) -> str:
+    """A coarse colour name for an LED, from the light around it.
 
-    Measured SPILL_BAND pitches from the core. Single-colour LEDs give almost
-    nothing in the channel opposite their own. White LEDs are blue LEDs with a
-    phosphor coat, so their spill still peaks in blue, and what tells them from
-    blue is red: a blue LED adds none (BLUE_MAX_RED), a white one always some
-    (WHITE_MIN_RED). In between is "unknown" rather than a guess.
+    increase is the mean RGB brightness increase in the spill, SPILL_BAND
+    pitches from the core. Single-colour LEDs give almost nothing in the channel
+    opposite their own, so the channel that rose most names red and green ones.
 
-    How much red and green a white LED shows depends on the camera. When the LED
-    comes on, the camera darkens its picture, and that takes away red and green
-    the room was giving; a laptop camera cut the red far from the LED by half,
-    leaving the white LED's spill 5% red and 35% green beside its blue, where a
-    phone showed 6-63% and 47-85%. Green cannot tell white from blue at all: a
-    blue LED's spill was 7-61% green over the same runs. So green is not used.
-
-    red_spread is the share of the glow's pixels that gained red (find_glow
-    measures it). White needs it to be at least MIN_RED_SPREAD, so that one
-    streak of stray red beside a blue LED is not taken for white. None means it
-    was not measured, and the mean alone decides.
+    White LEDs are blue LEDs with a phosphor coat, so their spill peaks in blue
+    too. What tells the two apart is the colour of the lit board, not how much
+    any channel rose. pale holds its green as a share of its blue, in each ring
+    that could be read (find_glow measures them, SPILL_BAND first, then
+    COLOUR_ZONES, nearest first). Somewhere a blue LED turns the board deep
+    blue (BLUE_MAX_GREEN). A white one leaves it pale in every ring
+    (WHITE_MIN_GREEN), about equally (FLAT), and no paler far out than close in
+    (PALER_OUT), and all the rings must have been read to say so. Anything
+    else is "unknown" rather than a guess.
 
     On camera, green LEDs spill cyan-ish light that peaks in green. Only red,
     green, blue and white have been seen on camera; the yellow and orange
@@ -229,10 +309,15 @@ def glow_colour(increase: np.ndarray, red_spread: float | None = None) -> str:
     if top < 1.0:
         return "unknown"
     if top == b:
-        if r / b <= BLUE_MAX_RED:
+        if not len(pale):
+            return "unknown"
+        if min(pale) <= BLUE_MAX_GREEN:
             return "blue"
-        spread = red_spread is None or red_spread >= MIN_RED_SPREAD
-        return "white" if r / b >= WHITE_MIN_RED and spread else "unknown"
+        if len(pale) <= len(COLOUR_ZONES) or min(pale) < WHITE_MIN_GREEN:
+            return "unknown"
+        even = max(pale) <= FLAT * min(pale)
+        fades = max(pale[1:]) > PALER_OUT * pale[0]
+        return "white" if even and not fades else "unknown"
     if top == g:
         return "white" if min(r, b) / g >= 0.5 else "green"
     if min(g, b) / r >= 0.5:
@@ -242,13 +327,65 @@ def glow_colour(increase: np.ndarray, red_spread: float | None = None) -> str:
     return "orange" if g / r > 0.45 else "red"
 
 
-def _red_spread(increase: np.ndarray) -> float:
-    """The share of the spill's pixels that gained red beside their blue, among
-    those the glow clearly reached. increase is one row of RGB gain per pixel."""
-    reached = increase[increase[:, 2] >= GLOW_LEVELS]
-    if not len(reached):
+def board_change(on: np.ndarray, off: np.ndarray, pitch: float) -> np.ndarray:
+    """How the picture changed from off to on, two photos lined up on the board:
+    the signed difference per channel, blurred by a pitch, at CHANGE_SCALE.
+
+    Blurred and signed, what two photos a little out of line leave at every
+    hole's edge cancels, and what a glow adds or takes away does not.
+    """
+    small = [
+        cv2.resize(
+            im.astype(np.float32),
+            None,
+            fx=CHANGE_SCALE,
+            fy=CHANGE_SCALE,
+            interpolation=cv2.INTER_AREA,
+        )
+        for im in (on, off)
+    ]
+    return cv2.GaussianBlur(small[0] - small[1], (0, 0), pitch * CHANGE_SCALE)
+
+
+def _strength(change: np.ndarray, near: np.ndarray, far: np.ndarray) -> float:
+    """How much more the board changed in near than in far (masks the size of
+    change), in whichever channel differs most, up or down. 0 if near is empty.
+
+    Taking far away leaves out what the room's light did between the two
+    photos, which reaches the whole board alike. An LED's glow does not.
+    """
+    if not near.any():
         return 0.0
-    return float((reached[:, 0] > WHITE_MIN_RED * reached[:, 2]).mean())
+    around = change[near].mean(axis=0)
+    beyond = change[far].mean(axis=0) if far.any() else 0.0
+    return float(np.abs(around - beyond).max())
+
+
+def _uneven(change: np.ndarray, board: np.ndarray) -> tuple[float, float]:
+    """How unevenly the board changed: how far each point's change is from the
+    board's median change, in whichever channel is furthest, as the mean over
+    board (a mask the size of change) and as its peak (the 99th percentile). A
+    change that is the same all over, as when the room's light or the camera's
+    exposure shifts, scores nothing. A faint glow in one place shows in the
+    peak before it moves the mean."""
+    if not board.any():
+        return 0.0, 0.0
+    over = change[board]
+    apart = np.abs(over - np.median(over, axis=0)).max(axis=1)
+    return float(apart.mean()), float(np.percentile(apart, 99))
+
+
+def too_bright(image: np.ndarray, rect: Rectification) -> bool:
+    """Whether the unlit board is washed out in this photo (MAX_BRIGHT_SHARE).
+
+    Then no pin is judged: a lit LED could show no new white core and no glow,
+    and would be reported as a broken branch.
+    """
+    inside = board_mask(image.shape, rect) > 0
+    if not inside.any():
+        return False
+    bright = image.min(axis=2)[inside] >= WAS_BELOW
+    return float(bright.mean()) > MAX_BRIGHT_SHARE
 
 
 def find_glow(
@@ -257,12 +394,21 @@ def find_glow(
     off: np.ndarray,
     rect: Rectification,
     seen: np.ndarray | None = None,
+    quiet: Sequence[np.ndarray] = (),
 ) -> Glow:
     """Compare RGB frames taken with the pin on and off, lined up on the board.
 
     seen, if given, is 1 where both photos actually showed the board. A photo
     warped into line is black where it saw nothing, and black would read as
     "dark before" next to anything bright.
+
+    quiet holds board_change() for pins of the same run that lit nothing, lined
+    up the same way. A glow must stand well above what the same patch of board
+    did in those (GLOW_OVER_QUIET), as well as above GLOW_FLOOR.
+
+    The glow is how much more the ring around the core changed than the board
+    far from it did (_strength), so light that changed over the whole board
+    between the two photos does not count for or against it.
     """
     inside = board_mask(on.shape, rect)
     if seen is not None:
@@ -275,13 +421,12 @@ def find_glow(
     areas = stats[1:, cv2.CC_STAT_AREA] if count > 1 else np.zeros(0, int)
     cores = [i + 1 for i in np.argsort(-areas) if areas[i] >= MIN_CORE_PITCH2 * pitch**2]
 
+    change = board_change(on, off, pitch)
+
     if not cores:
-        on_v, off_v = (
-            cv2.GaussianBlur(im.max(axis=2).astype(np.float32), (0, 0), pitch)
-            for im in (on, off)
-        )
-        if np.abs(on_v - off_v)[inside > 0].mean() >= SPILL_LEVELS:
-            return Glow(pin, "unclear", "the board brightened, but no LED core showed")
+        mean, peak = _uneven(change, _shrink(inside, change) > 0)
+        if mean >= SPILL_LEVELS or peak >= SPILL_PEAK:
+            return Glow(pin, "unclear", "the board changed, but no LED core showed")
         return Glow(pin, "dark")
 
     main = cores[0]
@@ -289,30 +434,51 @@ def find_glow(
     x, y = (float(v) for v in centres[main])
     if size > MAX_CORE_SHARE * inside.sum():
         return Glow(pin, "unclear", "much of the board lit up at once", core_px=size)
-    far = [
-        i
-        for i in cores[1:]
-        if np.hypot(*(centres[i] - centres[main])) > SEPARATE_PITCHES * pitch
-    ]
-    if far:
+    away = cv2.distanceTransform((labels != main).astype(np.uint8), cv2.DIST_L2, 5)
+
+    def second_light(i: int) -> bool:
+        if away[labels == i].min() > SEPARATE_GAP * pitch:
+            return True
+        apart = np.hypot(*(centres[i] - centres[main])) > SEPARATE_PITCHES * pitch
+        return bool(apart) and stats[i, cv2.CC_STAT_AREA] >= FRAGMENT_SHARE * size
+
+    if any(second_light(int(i)) for i in cores[1:]):
         return Glow(pin, "unclear", "light appeared in two places", core_px=size)
 
-    away = cv2.distanceTransform((labels != main).astype(np.uint8), cv2.DIST_L2, 5)
-    near, far_edge = (d * pitch for d in SPILL_BAND)
-    band = (away > near) & (away <= far_edge) & (inside > 0)
-    band &= on.min(axis=2) < SATURATED
-    increase = np.clip(on.astype(np.int16) - off.astype(np.int16), 0, None)[band]
-    spill = increase.mean(axis=0) if len(increase) else np.zeros(3)
-    if spill.max() < MIN_SPILL:
+    unclipped = (inside > 0) & (on.min(axis=2) < SATURATED)
+
+    def ring(band: tuple[float, float]) -> np.ndarray:
+        return (away > band[0] * pitch) & (away <= band[1] * pitch) & unclipped
+
+    band = ring(SPILL_BAND)
+    near = _shrink(band.astype(np.uint8), change) > 0
+    beyond = (away > FAR_PITCHES * pitch) & (inside > 0)
+    far = _shrink(beyond.astype(np.uint8), change) > 0
+    strength = _strength(change, near, far)
+    if strength < GLOW_FLOOR:
         return Glow(
             pin, "unclear", "a white spot appeared with no glow around it", core_px=size
         )
+    if any(strength < GLOW_OVER_QUIET * _strength(q, near, far) for q in quiet):
+        return Glow(
+            pin,
+            "unclear",
+            "the light kept changing, too much to be sure of a glow",
+            core_px=size,
+        )
+    increase = np.clip(on.astype(np.int16) - off.astype(np.int16), 0, None)[band]
+    spill = increase.mean(axis=0) if len(increase) else np.zeros(3)
+    pale = []
+    for where in [band] + [ring(zone) for zone in COLOUR_ZONES]:
+        if where.sum() >= MIN_ZONE_PITCH2 * pitch**2:
+            lit = on[where].mean(axis=0)
+            pale.append(float(lit[1] / max(lit[2], 1.0)))
     return Glow(
         pin,
         "lit",
         hole=rect.hole_at((x, y)),
         photo_xy=(x, y),
-        colour=glow_colour(spill, _red_spread(increase)),
+        colour=glow_colour(spill, pale),
         core_px=size,
     )
 
@@ -400,13 +566,23 @@ class Session:
     fast, the two alignments of its lit photo disagreed, or there was no trusted
     unlit photo near enough to check against (see analyse). shorted
     holds pins that did not go high when switched on, and so were switched
-    straight back off.
+    straight back off. too_bright means the unlit board was washed out in the
+    photo it was fitted on (too_bright), and then no pin is judged either.
+
+    calm holds pins that are "unclear" only because the board changed unevenly
+    with no core, and no more than the run's other pins with no core did
+    (CALM_OVER_TYPICAL): the room's light kept changing. Nothing says an LED lit
+    there and nothing rules out a faint one, so they are not called dark. A
+    caller that only needs such a pin to be quiet, because nothing should be on
+    it, can take it as quiet (verify does).
     """
 
     rect: Rectification | None
     glows: dict[int, Glow] = field(default_factory=dict)
     moved: frozenset[int] = frozenset()
     shorted: frozenset[int] = frozenset()
+    too_bright: bool = False
+    calm: frozenset[int] = frozenset()
 
 
 def _small_grey(image: np.ndarray) -> np.ndarray:
@@ -637,10 +813,14 @@ def _step(
     new: np.ndarray,
     fitted: np.ndarray,
     rect: Rectification,
-) -> tuple[np.ndarray, Glow] | None:
+) -> tuple[np.ndarray, Glow, Views, np.ndarray] | None:
     """Line up new, an unlit photo next to a trusted one (anchor), and judge on,
-    the lit photo between them. Returns new's warp, now trusted, and the result;
-    None if they cannot be lined up with confidence.
+    the lit photo between them. Returns new's warp, now trusted; the result;
+    what it was judged from (on and new as the fitted photo sees them, and
+    where both saw the board), so analyse can judge it again; and how the
+    picture changed between the two unlit photos (board_change), which shows
+    what this run's photos do when nothing is lit. None if they cannot be
+    lined up with confidence.
 
     on is lined up twice: via new, and via the trusted anchor. The two must put
     the board in the same place, at its centre and at the LED if one lit.
@@ -657,16 +837,14 @@ def _step(
     if _gap(via_new, via_anchor, _corners(rect).mean(axis=0)) > limit:
         return None
     seen = seen_by(via_new, on, fitted) & seen_by(new_warp, new, fitted)
-    glow = find_glow(
-        pin,
-        warp_onto(on, via_new, fitted),
-        warp_onto(new, new_warp, fitted),
-        rect,
-        seen,
-    )
+    views = warp_onto(on, via_new, fitted), warp_onto(new, new_warp, fitted), seen
+    glow = find_glow(pin, views[0], views[1], rect, seen)
     if glow.photo_xy is not None and _gap(via_new, via_anchor, glow.photo_xy) > limit:
         return None  # agree at the centre but not here: the board turned
-    return new_warp, glow
+    rest = board_change(views[1], warp_onto(anchor, anchor_warp, fitted), pitch)
+    both = seen_by(new_warp, new, fitted) & seen_by(anchor_warp, anchor, fitted)
+    rest[_shrink(both, rest) == 0] = 0  # where either saw nothing, say nothing
+    return new_warp, glow, views, rest
 
 
 def seen_by(warp: np.ndarray, image: np.ndarray, like: np.ndarray) -> np.ndarray:
@@ -710,6 +888,15 @@ def analyse(
     lit photo between them lines up the same way via both (_step). Otherwise
     that pin is set aside, and the next one is checked against the last trusted
     photo instead, so one slip cannot carry into later pins.
+
+    The photos that hold no glow show how much this run's pictures differ when
+    nothing happens: each pin that showed no core, and the two unlit photos
+    either side of every lit one. Each lit pin is then judged again against
+    them (find_glow's quiet), so a run with noisy photos asks more of a glow
+    than a still one does. And a pin with no core whose board changed unevenly,
+    but no more than the run's other such pins, is listed as calm (see Session).
+
+    If the unlit board is washed out in the fitted photo, nothing is judged.
     """
     photographed = [p for p in pins if f"pin{p}_on" in frames and f"pin{p}_off" in frames]
     # Unlit photos in time order; the lit photo of photographed[k] sits between
@@ -724,9 +911,15 @@ def analyse(
                 break
     if rect is None or fitted is None:
         return Session(rect=None, shorted=frozenset(shorted))
+    if too_bright(fitted, rect):
+        return Session(rect, shorted=frozenset(shorted), too_bright=True)
 
+    pitch = photo_pitch(rect)
     glows: dict[int, Glow] = {}
     moved: set[int] = set()
+    lit: dict[int, Views] = {}
+    quiet: list[np.ndarray] = []  # how the picture changed where nothing glowed
+    coreless: dict[int, tuple[float, float]] = {}  # how unevenly it changed
     for direction in (1, -1):
         anchor: np.ndarray = fitted
         anchor_warp = np.eye(3)
@@ -740,9 +933,32 @@ def analyse(
             if new is None or done is None:
                 moved.add(pin)
             else:
-                anchor, (anchor_warp, glows[pin]) = new, done
+                anchor_warp, glows[pin], views, rest = done
+                anchor = new
+                quiet.append(rest)
+                if glows[pin].status == "lit":
+                    lit[pin] = views
+                elif not glows[pin].core_px:
+                    change = board_change(views[0], views[1], pitch)
+                    board = board_mask(fitted.shape, rect) & views[2]
+                    coreless[pin] = _uneven(change, _shrink(board, change) > 0)
+                    quiet.append(change)
             i += direction
-    return Session(rect, glows, frozenset(moved), frozenset(shorted))
+    calm: set[int] = set()
+    if len(coreless) >= MIN_CALM:
+        mean, peak = (float(np.median(v)) for v in zip(*coreless.values(), strict=True))
+        calm = {
+            pin
+            for pin, (m, k) in coreless.items()
+            if glows[pin].status == "unclear"
+            and m < CALM_OVER_TYPICAL * mean
+            and k < CALM_OVER_TYPICAL * peak
+        }
+    for pin, (on, off, seen) in lit.items():
+        glows[pin] = find_glow(pin, on, off, rect, seen, quiet)
+    return Session(
+        rect, glows, frozenset(moved), frozenset(shorted), calm=frozenset(calm)
+    )
 
 
 @dataclass(frozen=True)
@@ -764,7 +980,9 @@ def retried(first: Session, again: Session) -> Session:
     grade. A glow's photo position is moved into the first run's photo, so it
     can be drawn there. A pin set aside again stays set aside.
     """
-    if first.rect is None or again.rect is None:
+    if first.rect is None or first.too_bright:
+        return first
+    if again.rect is None or again.too_bright:
         return first
     if again.rect.confidence < first.rect.confidence:
         return first
@@ -776,7 +994,8 @@ def retried(first: Session, again: Session) -> Session:
         elif pin in again.glows:
             glows[pin] = _into(again.glows[pin], again.rect, first.rect)
             moved.discard(pin)
-    return Session(first.rect, glows, frozenset(moved), frozenset(shorted))
+    calm = first.calm | (again.calm & first.moved)
+    return Session(first.rect, glows, frozenset(moved), frozenset(shorted), calm=calm)
 
 
 def _into(glow: Glow, source: Rectification, target: Rectification) -> Glow:

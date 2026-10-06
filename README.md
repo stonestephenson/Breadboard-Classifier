@@ -114,7 +114,10 @@ the board. A pin whose photos could not be lined up, because the board moved, is
 its own straight away, up to twice. It gives which pin drives which LED, its colour, and its column (the row is
 approximate, because the LED stands above the board). When what it sees is not one clean LED,
 such as a glow with no bright centre or light in two places, it says "unclear" rather than
-guessing. Frame the board large, in a lit room. The board may be held up to the camera in your
+guessing. The bar for a glow is set by each check's own photos in which nothing lit, above a
+small fixed floor, so a brighter room, another camera, or light that keeps changing does not
+change the answer. A board so bright that it is washed out in the picture is said to be too
+bright, and nothing is judged. Frame the board large, in a lit room. The board may be held up to the camera in your
 hands: the photos are lined up on the board itself before they are compared. Only
 the pin under test is ever driven. Every other pin is disconnected, so pins wired together
 cannot fight, and no pin can pose as a ground. A pin tied to ground is released at once. However

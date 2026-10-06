@@ -221,6 +221,21 @@ def verify(lab: Netlist, session: Session, pins_run: Sequence[int]) -> Verdict:
                 ),
             ),
         )
+    if session.too_bright:
+        return Verdict(
+            False,
+            "The picture is too bright to check the LEDs.",
+            (
+                Finding(
+                    "too_bright",
+                    "The board is so bright in the picture that I could not tell "
+                    "whether an LED lit.",
+                    severity="uncertain",
+                    suggestion="Move the board out of direct light, or turn the "
+                    "lamp away, and check again.",
+                ),
+            ),
+        )
 
     lit = {p: g for p, g in session.glows.items() if g.status == "lit"}
     findings: list[Finding] = list(cannot)
@@ -248,7 +263,9 @@ def verify(lab: Netlist, session: Session, pins_run: Sequence[int]) -> Verdict:
             findings.append(_tied_to_ground(pin, (), severity="warning"))
         elif pin in session.moved:
             findings.append(_not_checked(pin, "its photos could not be lined up"))
-        elif glow is not None and glow.status == "unclear":
+        elif glow is not None and glow.status == "unclear" and pin not in session.calm:
+            # A calm pin showed no LED, only the room's light changing as it did
+            # on every quiet pin. Nothing should be on this pin, so that will do.
             findings.append(_not_checked(pin, glow.note or "the picture was unclear"))
         elif glow is not None and glow.status == "lit" and pin not in explained:
             findings.append(

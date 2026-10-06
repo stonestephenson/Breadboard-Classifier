@@ -183,7 +183,7 @@ Every stage speaks in `Finding`s (`check.py`). The kinds above come from the che
 |------|------|---------|
 | `led_does_not_light`, `wrong_led_on_pin`, `unexpected_led` | `verify.py` | What a pin lit differs from the lab |
 | `pin_tied_to_ground` | `verify.py` | The pin read low when driven, and was released |
-| `not_checked`, `cannot_check`, `board_not_found`, `imperfect_view` | `verify.py` | Doubt: unclear photos, an LED blinking cannot test, no board, a poor fit |
+| `not_checked`, `cannot_check`, `board_not_found`, `too_bright`, `imperfect_view` | `verify.py` | Doubt: unclear photos, an LED blinking cannot test, no board, a board washed out in the picture, a poor fit |
 | `entry_mismatch` | `diagnose.py` | Light where the described build predicts none; no fix is shown |
 | `hidden_fault` | `diagnose.py` | Placed right but dark: the next cause to try |
 | `entry_unreadable` | `tools/blink.py` | The build file could not be read, or is written like a lab |

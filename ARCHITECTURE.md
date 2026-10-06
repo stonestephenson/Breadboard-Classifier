@@ -229,8 +229,21 @@ Two capabilities this unlocks beyond plain connectivity:
   outward from the photo the board was fitted on: the board is followed photo by photo, each lit
   photo is lined up twice (via the unlit photos on either side), and an unlit photo is trusted
   only when the two agree, at the board's centre and at the LED. Otherwise that pin is set aside
-  and the next is checked against the last trusted photo, so a slip cannot carry forward. Colour is read 1.5-3 pitches out, past where the overloaded sensor bleeds
-  into every channel.
+  and the next is checked against the last trusted photo, so a slip cannot carry forward.
+  *Judged against itself (2026-10-05)*: a laptop camera in brighter light failed every check. A
+  green LED raised the green around it by 33-49 levels where a fixed 60 was asked for, and white
+  could not be told from blue by how much red rose. So the bar is now set by each run itself,
+  above a small fixed floor. The glow is how much more the board beside the core changed than the board far from it,
+  up or down, in any channel (that camera crushed red from 196 to 15 around the green LED). It
+  must stand well above what the same patch did in the run's own photos that hold no glow: the
+  pins that lit nothing, and the two unlit photos either side of each lit one. White is told
+  from blue by the colour of the lit board in three rings out to 10 pitches, the outer two past
+  where the overloaded sensor bleeds into every channel: deep blue somewhere for a blue LED,
+  evenly pale for a white one. With a screen saver throwing a new colour of light over the
+  board every second, all four LEDs were still found and no empty pin was taken for one. A
+  pin with no LED is then not called dark, only "calm" (it changed as the other empty pins
+  did), which is enough for a pin the lab leaves empty and never enough to call an LED
+  broken. A board washed out to white is said to be too bright, and nothing is judged.
 
 Remaining dependency is no longer firmware but the **web app**: whether our code may send raw
 serial commands through it.
