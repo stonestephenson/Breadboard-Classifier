@@ -20,9 +20,10 @@ So comparison happens on an abstraction, in two steps:
    makes resistor-then-LED equal LED-then-resistor, while *direction* is kept so
    a reversed LED still fails.
 
-Attributes are compared only where the reference specifies them: an author who
-omits an LED colour means "any colour". Wire colour is never significant --
-the curriculum team confirmed colours are conventions students do not follow.
+Attributes are compared only where both circuits state them: a lab author who
+omits an LED colour means "any colour", and a build that does not say which
+kind of sensor it holds is not wrong for that. Wire colour is never significant
+-- the curriculum team confirmed colours are conventions students do not follow.
 """
 
 from __future__ import annotations
@@ -39,6 +40,8 @@ SIGNIFICANT_ATTRS: dict[str, tuple[str, ...]] = {
     "resistor": ("ohms",),
     "wire": (),
     "button": (),
+    "sensor3": ("kind",),
+    "sensor4": ("kind",),
 }
 
 

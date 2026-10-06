@@ -106,6 +106,39 @@ class TestEquivalence:
     def test_a_wire_one_column_off_does_not_match(self):
         assert not equivalent(activity3(vcc="a10", power="j30"), activity3())
 
+    def test_a_different_kind_of_sensor_does_not_match(self):
+        other = activity3()
+        other["LIGHT"].attrs["kind"] = "temperature"
+        assert not equivalent(other, activity3())
+
+    def test_a_kind_only_one_file_states_is_not_compared(self):
+        unstated = activity3()
+        del unstated["LIGHT"].attrs["kind"]
+        assert equivalent(unstated, activity3())
+        assert equivalent(activity3(), unstated)
+
+    def test_a_four_leg_sensors_kind_is_compared_too(self):
+        def lab(kind: str) -> Netlist:
+            return Netlist(
+                components=[
+                    mcu(**{"5V": "f32", "GND": "f33", "D7": "f40", "D8": "f41"}),
+                    Component(
+                        id="RANGE",
+                        type="sensor4",
+                        attrs={"kind": kind},
+                        pins={
+                            "vcc": Pin("j32"),
+                            "trig": Pin("j40"),
+                            "echo": Pin("j41"),
+                            "gnd": Pin("j33"),
+                        },
+                    ),
+                ]
+            )
+
+        assert equivalent(lab("ultrasonic"), lab("ultrasonic"))
+        assert not equivalent(lab("infrared"), lab("ultrasonic"))
+
 
 class TestCheckerOnActivity3:
     def test_the_correct_build_is_clean(self):
@@ -186,6 +219,21 @@ class TestCheckerOnActivity3:
         student = activity3()
         student.components.append(sensor(vcc="a30", out="a32", gnd="a34", cid="L2"))
         assert "extra_component" in [f.kind for f in check(student, activity3())]
+
+    def test_the_wrong_kind_of_sensor_is_reported_as_the_wrong_part(self):
+        student = activity3()
+        student["LIGHT"].attrs["kind"] = "temperature"
+        found = check(student, activity3())
+        assert [f.kind for f in found] == ["extra_component", "missing_component"]
+        assert "temperature sensor" in found[0].message
+        assert found[1].suggestion == "Add the light sensor."
+
+    def test_a_build_that_leaves_the_kind_out_still_gets_its_wiring_fix(self):
+        # Not "an extra sensor": the kind is compared only when both files say.
+        student = activity3()
+        del student["LIGHT"].attrs["kind"]
+        student["W_power"].pins["2"] = Pin("a11")
+        assert [f.kind for f in check(student, activity3())] == ["wrong_connection"]
 
     def test_an_uncertain_wire_reading_is_not_an_accusation(self):
         student = activity3()

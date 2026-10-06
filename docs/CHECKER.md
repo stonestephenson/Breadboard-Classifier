@@ -51,8 +51,11 @@ So `graph.py` compares in two steps:
    carrying an unordered bag of parts makes resistor-then-LED equal LED-then-resistor, while
    *direction* is preserved so a reversed LED still fails.
 
-Attributes are compared only where the reference states them: an author who omits an LED colour
-means "any colour". Wire colour is never significant — the curriculum team confirmed colours are
+Attributes are compared only where both circuits state them: a lab author who omits an LED colour
+means "any colour", and a build that does not say which kind of sensor it holds is not wrong for
+that. The count of parts (`extra_component`, `missing_component`) follows the same rule, and a
+missing part is named by its type alone ("an LED") when a part with nothing stated could have
+been it. Wire colour is never significant — the curriculum team confirmed colours are
 conventions students do not reliably follow.
 
 ## Uncertainty comes before accusation
@@ -81,7 +84,7 @@ Needing no reference circuit:
 
 | Kind | Meaning |
 |------|---------|
-| `shorted_component` | Both legs in one strip, so current skips past the part |
+| `shorted_component` | Both legs in one strip or one rail, so current skips past the part |
 | `short_circuit` | Power wired straight to ground through wires alone |
 | `led_without_resistor` | An LED across a supply with nothing to limit current |
 | `dead_rail_segment` | Wired into the unpowered half of a split rail (split-rail boards only) |
@@ -207,8 +210,8 @@ Every stage speaks in `Finding`s (`check.py`). The kinds above come from the che
 | `seen`, `reason`, `read_as`, `might_be`, `confidence` | What was observed, for messages |
 
 Pins are ints in `blink.py`, `verify.py` and `diagnose.py`, and names like `"D4"` in a `Netlist`.
-A circuit file's parts take `attrs`: `color` (LED), `ohms` (resistor), `kind` (sensor; carried
-but not compared, so the wrong kind of sensor passes: `graph.SIGNIFICANT_ATTRS`), and
+A circuit file's parts take `attrs`: `color` (LED), `ohms` (resistor), `kind` (sensor; the
+wrong kind is reported as an extra part and a missing one: `graph.SIGNIFICANT_ATTRS`), and
 `direction: "unknown"` (an LED whose way round was not seen). A leg is `{"hole": "d31"}` or, in
 a lab, `{"net": "white"}`.
 

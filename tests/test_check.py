@@ -62,6 +62,20 @@ def blink(
     )
 
 
+def two_leds(first: dict, second: dict, slip: str = "a20") -> Netlist:
+    """D2 -> 330R -> an LED -> GND, and the same from D3, each LED with the attrs
+    given. slip moves the first resistor's far leg: a wiring mistake."""
+    return Netlist(
+        components=[
+            mcu(D2="a10", D3="a12", GND="a30"),
+            part("R1", "resistor", "b10", slip, ohms=330),
+            part("L1", "led", "b20", "b30", **first),
+            part("R2", "resistor", "b12", "a22", ohms=330),
+            part("L2", "led", "b22", "c30", **second),
+        ]
+    )
+
+
 def kinds(findings):
     return [f.kind for f in findings]
 
@@ -143,6 +157,54 @@ class TestInventory:
         student.components.append(part("L9", "led", "a40", "a45", color="green"))
         assert "extra_component" in kinds(check(student, blink()))
 
+    def test_a_colour_only_one_file_states_does_not_make_a_different_part(self):
+        # As graph.py compares parts: what either file leaves out is not
+        # compared. The answer is the wiring mistake, not "an extra LED".
+        lab = blink()
+        del lab["L1"].attrs["color"]
+        assert kinds(check(blink(led_from="a21"), lab)) == ["wrong_connection"]
+        student = blink(led_from="a21")
+        del student["L1"].attrs["color"]
+        assert kinds(check(student, blink())) == ["wrong_connection"]
+
+    def test_parts_are_paired_so_that_as_many_as_can_be_are(self):
+        # The LED with no colour stated can stand for the lab's blue one, which
+        # leaves the red one for the lab's LED of any colour. Pairing the two
+        # with nothing stated first would leave red against blue.
+        lab = two_leds({"color": "blue"}, {})
+        student = two_leds({}, {"color": "red"}, slip="a21")
+        assert kinds(check(student, lab)) == ["wrong_connection"]
+
+    def test_a_part_that_says_what_it_is_is_paired_before_one_that_does_not(self):
+        # The red LED is the lab's red LED, so the one with no colour is the
+        # extra, though it comes first in the file.
+        student = blink()
+        student.components.insert(1, part("L0", "led", "a40", "a45"))
+        [found] = check(student, blink())
+        assert (found.kind, found.components) == ("extra_component", ("L0",))
+
+    def test_a_missing_part_is_not_given_a_colour_that_is_only_a_guess(self):
+        # The LED with no colour could be the lab's blue one or its green one,
+        # so which of the two is missing is not known.
+        lab = two_leds({"color": "blue"}, {"color": "green"})
+        found = check(two_leds({"color": "yellow"}, {}), lab)
+        assert kinds(found) == ["extra_component", "missing_component"]
+        assert "extra yellow LED" in found[0].message
+        assert found[1].message == "The lab needs an LED that is not on the board."
+        assert found[1].suggestion == "Add the LED."
+
+    @pytest.mark.parametrize(
+        ("colour", "said"),
+        [("red", "a red LED"), ("orange", "an orange LED"), (None, "an LED")],
+    )
+    def test_a_missing_part_is_asked_for_with_a_or_an(self, colour, said):
+        lab = blink()
+        lab["L1"].attrs = {"color": colour} if colour else {}
+        student = blink()
+        student.components = [c for c in student.components if c.id != "L1"]
+        [found] = [f for f in check(student, lab) if f.kind == "missing_component"]
+        assert found.message == f"The lab needs {said} that is not on the board."
+
 
 class TestUncertainty:
     def test_a_near_miss_reading_is_not_reported_as_an_error(self):
@@ -193,6 +255,47 @@ class TestSanityRulesWithoutAReference:
             ]
         )
         assert "shorted_component" in kinds(check(n))
+
+    def test_a_shorted_part_is_named_in_plain_words_with_its_strip(self):
+        n = Netlist(
+            components=[
+                mcu(D2="a10", GND="a30"),
+                part("L1", "led", "a20", "c20", color="red"),
+            ]
+        )
+        [f] = [f for f in check(n) if f.kind == "shorted_component"]
+        assert f.message.startswith("Both legs of the red LED are in the same strip")
+        assert "a20 to e20" in f.message
+        assert "L1" not in f.message and "row" not in f.message
+        assert f.suggestion == "Move one leg to a different column."
+
+    def test_a_part_shorted_in_a_lab_file_is_said_by_its_net(self):
+        # A lab's file has nets and no holes, so there is no strip to name.
+        n = Netlist(
+            components=[
+                mcu(D2="net:white", GND="net:ground"),
+                part("R1", "resistor", "net:white", "net:ground", ohms=330),
+                part("L1", "led", "net:white", "net:white", color="white"),
+            ]
+        )
+        [f] = [f for f in check(n) if f.kind == "shorted_component"]
+        assert f.message.startswith(
+            "Both legs of the white LED are on the same net (white)"
+        )
+
+    def test_a_part_shorted_in_a_rail_is_not_sent_to_another_column(self):
+        # A rail runs the length of the board: another column is the same rail.
+        n = Netlist(
+            components=[
+                mcu(D2="a10", GND="a30"),
+                part("R1", "resistor", "p1-:5", "p1-:9", ohms=330),
+            ]
+        )
+        [f] = [f for f in check(n) if f.kind == "shorted_component"]
+        assert f.message.startswith(
+            "Both legs of the 330 ohm resistor are in the same rail"
+        )
+        assert f.suggestion and "column" not in f.suggestion
 
     def test_an_led_straight_across_power_has_no_resistor(self):
         n = Netlist(

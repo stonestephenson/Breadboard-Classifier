@@ -35,6 +35,7 @@ from breadboard.board import (
     same_rail_different_segment,
 )
 from breadboard.graph import (
+    SIGNIFICANT_ATTRS,
     CircuitGraph,
     Edge,
     Item,
@@ -148,17 +149,27 @@ def _shorted_components(n: Netlist) -> list[Finding]:
             continue
         p, q = c.ordered_pins()
         if p.node == q.node:
+            if is_rail(p.node):
+                # A rail runs the board's length: another column is the same rail.
+                where, fix = "in the same rail", "Move one leg out of that rail."
+            elif p.placed:
+                strip = holes_of(p.node)
+                where = f"in the same strip of holes ({strip[0]} to {strip[-1]})"
+                fix = "Move one leg to a different column."
+            else:  # a lab's own file, which has nets and no holes
+                where = f"on the same net ({p.net})"
+                fix = "Put one leg on a different net."
             out.append(
                 Finding(
                     kind="shorted_component",
                     message=(
-                        f"Both legs of {c.id} are in the same row, so "
+                        f"Both legs of {_describe(c)} are {where}, so "
                         f"electricity skips straight past it."
                     ),
                     components=(c.id,),
                     holes=(p.hole, q.hole),
                     scope=_scope(c),
-                    suggestion="Move one leg to a different column.",
+                    suggestion=fix,
                 )
             )
     return out
@@ -933,10 +944,20 @@ def _free_hole(n: Netlist, origin: str, target: str) -> str:
 
 
 def _signature(c: Component) -> tuple:
-    from breadboard.graph import SIGNIFICANT_ATTRS
-
     keys = SIGNIFICANT_ATTRS.get(c.type, ())
     return (c.type, tuple(sorted((k, c.attrs[k]) for k in keys if k in c.attrs)))
+
+
+def _same_part(a: Component, b: Component) -> bool:
+    """Could these be one part? The same type, and nothing both state differs.
+
+    As graph.py compares parts: what either circuit leaves out is not compared,
+    so a build that does not say a sensor's kind has not got the wrong sensor.
+    """
+    if a.type != b.type:
+        return False
+    keys = SIGNIFICANT_ATTRS.get(a.type, ())
+    return all(a.attrs[k] == b.attrs[k] for k in keys if k in a.attrs and k in b.attrs)
 
 
 def _inventory_diff(student: Netlist, reference: Netlist) -> list[Finding]:
@@ -946,17 +967,42 @@ def _inventory_diff(student: Netlist, reference: Netlist) -> list[Finding]:
     it is the fixed anchor rather than something a student adds, and so are
     wires: they are joins, not parts, and a build may need more or fewer of them
     than the lab's own drawing (graph.equivalent compares them as joins).
+
+    Parts that state the same things are paired first. Then as many of the rest
+    as can be (_same_part), moving a pairing along where that makes room: a part
+    with nothing stated can stand for any of its type.
     """
     s = [c for c in student if c.type not in ("mcu", "wire")]
     r = [c for c in reference if c.type not in ("mcu", "wire")]
-    pool = list(r)
-    extra = []
-    for c in s:
-        match = next((x for x in pool if _signature(x) == _signature(c)), None)
-        if match is None:
-            extra.append(c)
-        else:
-            pool.remove(match)
+    pair: dict[int, int] = {}  # each of the lab's parts -> the student's part it is
+    for i, c in enumerate(s):
+        twin = next(
+            (
+                j
+                for j, x in enumerate(r)
+                if j not in pair and _signature(x) == _signature(c)
+            ),
+            None,
+        )
+        if twin is not None:
+            pair[twin] = i
+
+    def place(i: int, tried: set[int]) -> bool:
+        for j, x in enumerate(r):
+            if j in tried or not _same_part(s[i], x):
+                continue
+            tried.add(j)
+            if j not in pair or place(pair[j], tried):
+                pair[j] = i
+                return True
+        return False
+
+    for i in range(len(s)):
+        if i not in pair.values():
+            place(i, set())
+    paired = set(pair.values())
+    extra = [c for i, c in enumerate(s) if i not in paired]
+    pool = [c for j, c in enumerate(r) if j not in pair]
 
     out = []
     for c in extra:
@@ -972,15 +1018,26 @@ def _inventory_diff(student: Netlist, reference: Netlist) -> list[Finding]:
                 detail={"type": c.type},
             )
         )
+
+    def guessed(c: Component) -> bool:
+        """Whether a part already paired could as well be this one, which would
+        leave a different one of the lab's over: which is missing is not known."""
+        return any(
+            _same_part(s[i], c) and _signature(r[j]) != _signature(c)
+            for j, i in pair.items()
+        )
+
     for c in pool:
+        # Named by its type alone when its colour or kind would be a guess.
+        named = _describe(Component(c.id, c.type, c.pins)) if guessed(c) else _describe(c)
+        what = named.removeprefix("the ")
         out.append(
             Finding(
                 kind="missing_component",
-                message=f"The lab needs a {_describe(c).removeprefix('the ')} that "
-                "is not on the board.",
+                message=f"The lab needs {_a(what)} {what} that is not on the board.",
                 components=(c.id,),
                 scope=_scope(c),
-                suggestion=f"Add {_describe(c)}.",
+                suggestion=f"Add {named}.",
                 detail={"type": c.type},
             )
         )
@@ -1054,6 +1111,11 @@ def _candidate_holes(student: Netlist) -> list[str]:
                 if 1 <= index + delta <= N_COLS:
                     holes.add(f"{where}{index + delta}")
     return sorted(holes)
+
+
+def _a(what: str) -> str:
+    """The article before a part's name: "an LED", "an ultrasonic sensor"."""
+    return "an" if what.startswith("LED") or what[:1].lower() in "aeiou" else "a"
 
 
 def _cap(text: str) -> str:
