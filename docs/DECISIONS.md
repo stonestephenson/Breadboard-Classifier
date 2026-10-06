@@ -28,8 +28,9 @@ quantity with free labels. Implemented in `../breadboard_generator` (phases 7–
 **Replaced by:** rectification (real → canonical) plus compositing of real component crops onto
 real board photos. See ARCHITECTURE.md §2 and §4.
 
-**Salvaged:** `grid.py`, `board_spec.json`, the circuit JSON schema, and `mutations.py` all
-carry forward. Only the renderer is retired.
+**Salvaged, as ideas only:** `grid.py`, `board_spec.json`, the circuit JSON schema, and
+`mutations.py`. Nothing in this repo imports them (see `CLAUDE.md`, "Related repos"). The
+renderer is retired.
 
 ---
 
@@ -89,6 +90,13 @@ afford.
 **Replaced by:** two-stage verification — check functional properties first (accepts all valid
 variants, including unanticipated ones), then compute minimum edit only on failure to produce
 an actionable repair instruction.
+
+**What was built instead (`breadboard/graph.py`, `docs/CHECKER.md`):** not property checks. The
+student's circuit is matched to the lab's one circuit after two normalisations: strips lose
+their names (only the Metro Mini's pins keep theirs), and a chain of parts in series collapses
+to one link carrying an unordered bag of parts. That is still matching up to relabelling, but
+on a graph in which the equivalent builds this entry worried about are the same graph. The
+minimum-edit search follows on failure, as planned.
 
 ---
 

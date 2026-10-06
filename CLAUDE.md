@@ -42,7 +42,9 @@ checker finds wiring mistakes from a described build, and `tools/probe.py --anal
 whether it works, but that measurement is not part of the live check. For a lab with the
 ultrasonic sensor the checker can represent the sensor; nothing measures it yet, though the
 shipped sketch can read a distance. An activity built off the Arduino cannot be covered at all.
-Student code is out of scope everywhere.
+Student code is out of scope everywhere. (A list of the activities themselves is kept out of
+this public repo on purpose: it comes from the local curriculum files, see "Third-party
+material".)
 
 ## Next
 
@@ -56,8 +58,9 @@ in for it. The Chrome/WebSerial port waits until everything else is an MVP. In o
    (`graph.find_isomorphism` anchors on pin names).
 3. **The ultrasonic sensor.** Ask the sketch for a distance; it works or it does not.
 4. **Show what the build file stands for.** Draw the entered parts on the photo, the ones
-   blinking confirmed in green; then a demo script and a one-page explainer. The demo is for
-   Stone's professor.
+   blinking confirmed in green. The demo is for Stone's professor, on 2026-10-07. A slide deck
+   (on Stone's Desktop; its source is in `data/cache/status_deck/`) and a recorded run-through
+   (`data/cache/demo_video/`) exist; drawing the parts is the piece not built.
 5. **More cameras and rooms.** Two cameras so far, a phone and one laptop's own, in one home. A
    Chromebook camera is untested. That laptop camera takes about a second to recover after a
    bright LED goes off, longer than `SETTLE_S`, so its unlit photos are up to 20 levels dark; the
@@ -80,6 +83,8 @@ part (a missing wire), and no first step when two changes only help together.
 The tests on real photos and recorded blink runs need files under `data/cache/`, which is not in
 git. Without them those tests skip (about 58) and the gate still goes green, so a fresh clone and
 CI never exercise real data. Do not tune `blink.py` or `rectify.py` on a machine without them.
+**`data/cache/` exists only on Stone's Mac. There is no second copy and no way to rebuild the
+recordings**, so do not rename, move or delete anything in it without need.
 
 - `data/cache/sample/` holds 12 photos sampled from `../breadboard_generator/data/real/`
   (`docs/SPIKE_RECTIFY.md`), and `data/cache/kit/basicboard.jpg` one photo of the kit's board.
@@ -89,6 +94,10 @@ CI never exercise real data. Do not tune `blink.py` or `rectify.py` on a machine
   check by eye what lit, rename the folder to `basicboard-<date>-<what>`, and add its expected
   pins, colours and columns to `LEDS` in `tests/test_blink.py` (and a case in `TestRecordedRun`
   in `tests/test_diagnose.py` if a build file goes with it).
+  Three wirings appear in the recordings and examples: the board as shipped (pin 2 red, 3 white,
+  4 green, 5 blue; `basicboard.json`), rewired on 2026-09-27 (2 green, 3 blue, 4 white, 5 red;
+  `basicboard_rewired.json`, recordings to 09-28), and the demo board since 2026-09-29 (3 white,
+  4 blue, 5 green, 6 red; `basicboard_demo.json`). The demo board is what is on the desk.
 - `data/cache/replay_pages/` holds the source of two published pages that replay the checker's
   recorded trials (`record.py` and two templates). They are not part of the product. Re-record
   after changing `check.py`.
@@ -96,11 +105,20 @@ CI never exercise real data. Do not tune `blink.py` or `rectify.py` on a machine
   constants in `blink.py`. `final_measure.py` prints what the code reads on every recorded run
   (glow, quiet samples, ring colours); `stress_fakes.py` feeds it faked glints and `stress.py
   bright` brightened runs; `mutate.py` breaks each rule in turn and checks a test fails. Not
-  part of the product. Run them after changing a constant there.
+  part of the product. Run them after changing a constant there. They hold absolute paths for
+  this machine.
+- `data/cache/status_deck/` is the source of the status slide deck (a `pptxgenjs` script and its
+  images), and `data/cache/demo_video/` a screen recording of the demo of 2026-10-05.
 
-Every tunable is a module constant with its measured range in the comment beside it: the
+`tools/leds.py` is untracked on purpose: Stone's own playground for lighting the LEDs from Python.
+It stays local, and its pin map is the board as shipped, not the demo board.
+
+Most tunables are module constants with their measured range in the comment beside them: the
 thresholds at the top of `breadboard/blink.py`, `MIN_COLUMN_MARGIN` in `rectify.py`, and
-`MAX_STEPS`, `MAX_FIXES`, `REACH`, `SLACK` in `check.py`. The alignment limits in `blink.py` were
+`MAX_STEPS`, `MAX_FIXES`, `REACH`, `SLACK` in `check.py`. A few are still inline and unmeasured:
+the colour ratios in `blink.glow_colour` (0.5, 0.75, 0.45, and the cut-off the known gap above
+turns on), the analog thresholds in `tools/probe.py` (`describe_analog`), and `SAMPLES` in
+`tools/blink.py`. The alignment limits in `blink.py` were
 measured at the 0.6 s settle time (`SETTLE_S` in `tools/blink.py`) and go with it. The only
 runtime knob is the `BREADBOARD_MODEL_DIR` environment variable (where the corner model is kept).
 
@@ -167,6 +185,8 @@ From Stone (project side):
 
 Sent to the curriculum/engineering team. Most are answered; `docs/OPEN_QUESTIONS.md` has the
 answers in full and is the one place they are kept.
+Some passages inside that file are older than its own headings (under Q1, Q4 and Q5). Where it and
+the table below disagree, the table is the current one.
 
 | # | Question | State |
 |---|----------|-------|

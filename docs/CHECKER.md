@@ -71,7 +71,11 @@ worst thing this system can do to a 13-year-old.
 ## Findings
 
 Each carries a kind, a message written for a young student, the components and holes involved, a
-concrete suggestion, and a `scope`.
+concrete suggestion, a `scope`, and a `severity`: `error` (something to fix), `warning`
+(something to look at), or `uncertain` (not seen clearly enough to say). Any finding at all
+withholds "works". Errors are listed first, then warnings, then doubts, and the summary is
+worded by the worst present. `diagnose.py` lowers a checker fix to `uncertain` when blinking
+did not clearly see the pin it concerns.
 
 Needing no reference circuit:
 
@@ -203,7 +207,8 @@ Every stage speaks in `Finding`s (`check.py`). The kinds above come from the che
 | `seen`, `reason`, `read_as`, `might_be`, `confidence` | What was observed, for messages |
 
 Pins are ints in `blink.py`, `verify.py` and `diagnose.py`, and names like `"D4"` in a `Netlist`.
-A circuit file's parts take `attrs`: `color` (LED), `ohms` (resistor), `kind` (sensor), and
+A circuit file's parts take `attrs`: `color` (LED), `ohms` (resistor), `kind` (sensor; carried
+but not compared, so the wrong kind of sensor passes: `graph.SIGNIFICANT_ATTRS`), and
 `direction: "unknown"` (an LED whose way round was not seen). A leg is `{"hole": "d31"}` or, in
 a lab, `{"net": "white"}`.
 
@@ -226,7 +231,7 @@ colour.
   to change" and what blinking saw.
 - **No natural-language rendering.** Findings carry a `message`, but turning a set of findings
   into a paragraph for a student is a separate layer.
-- **Nothing produces a Netlist yet from a photo.** The probe produces pin connectivity; wiring
-  that into a Netlist is the next integration step. For LED labs, `breadboard/verify.py` already
+- **Nothing produces a Netlist yet from a photo.** The probe produces pin connectivity; turning
+  that into a Netlist is not planned next (`CLAUDE.md`, "Next"). For LED labs, `breadboard/verify.py` already
   answers "does it work?" without one: it checks what each pin lit (blink and watch) against
   what the lab file expects, and returns findings in this module's `Finding` type.

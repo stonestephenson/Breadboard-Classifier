@@ -12,7 +12,7 @@ alignment overlay — from either a Chromebook webcam or a phone (§3[1]) — pl
 the lab the student is attempting.
 
 **Output:** either "your wiring matches the lab" (high confidence only), or a specific,
-actionable repair — "the black wire in row 14 needs to move one column left" — or an honest
+actionable repair — "the black wire in column 14 needs to move one column left" — or an honest
 abstention that asks for a better view or a connectivity-tester measurement.
 
 **Not in scope:** the student's program, circuits the student invented (deferred), anything
@@ -120,8 +120,9 @@ locally and uploading only the extracted netlist.
 
 **Rectifying first is what makes two capture paths affordable.** Both cameras produce the *same
 canonical view* — differing in effective resolution and sharpness, not geometry — so the
-perception model sees one domain, not two. Size canonical space for the worst case (≈24 px per
-pitch, which 720p supplies when guided capture makes the board fill the frame) and phone
+perception model sees one domain, not two. Size canonical space for the worst case (the estimate
+was ≈24 px per pitch, which 720p supplies when guided capture makes the board fill the frame; as
+built it is 16 px per pitch, `CANONICAL_SIZE` in `breadboard/rectify.py`) and phone
 capture simply oversamples it.
 
 Cost: evaluation data is needed from both. Any laptop webcam is an adequate development proxy
@@ -189,7 +190,7 @@ Association is the genuinely hard remainder. Helpful structure:
 
 ### [4] Measure — the Arduino probes its own circuit
 
-**Confirmed reachable (2026-08-06); protocol access pending.** The student's circuit is
+**Built, and working on real hardware (`tools/probe.py`).** The student's circuit is
 *always* electrically connected to the Arduino — there is no standalone battery case to blind
 us. A bidirectional command/response protocol over USB already exists and is in daily classroom
 use: the web app sends commands, the sketch executes them, data comes back.
@@ -203,14 +204,17 @@ reads. **A full connectivity probe is implementable today with no firmware chang
 external dependency.**
 
 The probe: put every pin in INPUT_PULLUP, then drive one pin LOW at a time and read the port
-registers. Any pin reading LOW shares an electrical node with the driven pin. ~65 transactions,
-well under a second. `analogRead`'s 10 bits additionally separate a direct connection from one
-through a 330 Ω resistor from a floating node.
+registers. Any pin reading LOW shares an electrical node with the driven pin. About 90
+transactions, well under a second (`docs/FIRMWARE_PROTOCOL.md`). *Not built, not validated:*
+using `analogRead`'s 10 bits to separate a direct connection from one through a 330 Ω resistor
+from a floating node. Through an LED and a resistor the passive reading is arbitrary (README,
+"What works, and what does not").
 
 Two capabilities this unlocks beyond plain connectivity:
 
-- **LED polarity becomes measurable.** A diode conducts one way only, so an asymmetric response
-  to reversed drive reveals orientation — retiring a perception problem §5 flags as known-hard.
+- **LED polarity becomes measurable.** *Not built as described* (an asymmetric response to
+  reversed drive). Polarity is settled by blinking instead: an LED that lights from its pin
+  faces forwards (`diagnose.settle_directions`).
 - **Stimulus–response capture.** We already record a video clip; if the Arduino toggles pins
   during it, *whichever LED blinks in the video is the LED on that pin*. Component-to-node
   association by observation rather than inference. **Working (2026-09-27)**
@@ -317,8 +321,9 @@ and blinking settles it: an LED that lights from its pin faces forwards. A pin w
 not be lined up is blinked again on its own at once, up to twice.
 
 These graphs are tiny — 10–30 typed nodes — so exact computation is instant. This stage is
-**deterministic code, fully unit-testable, with no learned components**, and `mutations.py`
-from the generator repo supplies test cases for free.
+**deterministic code, fully unit-testable, with no learned components**. (The generator repo's
+`mutations.py` was meant to supply test cases; it is not used. The mistakes tested are in
+`examples/make_examples.py` and `tests/test_check.py`.)
 
 ### [7] Explain
 
@@ -349,8 +354,8 @@ once from many angles to build a crop library, then paste real pixels into real 
 photos at programmatically chosen holes. Photorealistic by construction — every pixel came from
 a camera — and perfectly labelled, because we chose the placement.
 
-This reuses the generator's placement logic (`grid.py`, the circuit JSON schema,
-`mutations.py`) and discards only the renderer.
+This would reuse the generator's placement logic (`grid.py`, the circuit JSON schema,
+`mutations.py`) and discard only the renderer. None of it is built.
 
 Sources, in order of value:
 
@@ -374,7 +379,7 @@ From the STEMACES kit contents list. Roughly eight classes — small, which is g
 | LED (orange, white, variety) | Polarity matters and is **visually subtle**; the flat edge is often hidden once seated. Known-hard. |
 | Jumper wire — 12", 7.5 cm, 1" | Fixed lengths bound endpoint association. Short ones are rigid and span a known column count. |
 | Pre-stripped red wire, 2.5 cm | As above. |
-| Light sensor | Mount type unknown — see below. |
+| Light sensor | Three legs, plugged into the board (`sensor3` in `breadboard/netlist.py`). |
 | Temperature sensor | Mount type unknown. |
 | Ultrasonic sensor | Design-challenge set; may be out of scope. |
 | Metro Mini V2 | Rigid, known footprint. Straddles the centre channel, so all pins land in board holes. Easy case. |
@@ -406,7 +411,7 @@ deliberately deferred, not foreclosed — keep the model boundary clean so it ca
 | Occlusion hides connections | High | Multi-frame capture, measurement channel, abstention |
 | Wire endpoint association | High | Fixed lengths bound search; colour separates crossings; measurement confirms |
 | LED polarity not visible once seated | Medium | May be electrically detectable; otherwise a UX nudge |
-| Measurement channel unavailable (Q1/Q3 land badly) | High | Photo-only fallback; everything above still works, less reliably |
+| ~~Measurement channel unavailable (Q1/Q3 land badly)~~ | **Retired** | The shipped sketch's own commands are enough, and the circuit is always wired to the Arduino. `docs/FIRMWARE_PROTOCOL.md` |
 | Training data domain mismatch (phone vs webcam) | Medium | Second collection pass on the real device |
 | Classroom reality: hands, clutter, neighbouring boards | Medium | Guided capture constrains framing |
-| Answer keys do not exist yet as netlists | Medium | Build an authoring tool; needs a curriculum owner |
+| Lab circuits are written for three boards only | Medium | The two design-challenge activities leave the pin to the student, which a lab file cannot say yet (`CLAUDE.md`, "Next" 2) |

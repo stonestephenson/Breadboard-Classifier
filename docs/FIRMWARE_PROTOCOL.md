@@ -94,13 +94,13 @@ circuit already ties low reads low whatever is driven, so only a pin that was hi
 went low counts as joined. A pin that stays high while driven low is being forced up by the
 circuit; it is released at once and reported as a conflict.
 
-### analogRead makes it richer than continuity
+### analogRead makes it richer than continuity (not built, not validated)
 
 `analogRead` returns 10 bits, so a node's voltage distinguishes **direct connection** from
 **connection through a 330 Ω resistor** from **floating**. We can detect whether a resistor is
 actually in a path, not merely whether two points are joined.
 
-### LED polarity becomes measurable
+### LED polarity becomes measurable (not built; blinking settles it instead)
 
 ARCHITECTURE.md §5 flags LED polarity as visually subtle — the flat edge is usually hidden once
 seated. Electrically it is easy: a diode conducts one way only, so driving a pair of nodes one

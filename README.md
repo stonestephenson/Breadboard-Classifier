@@ -15,6 +15,11 @@ python3 -m venv venv
 ./.claude/verify.sh          # lint, format, types, tests — should print PASS
 ```
 
+The gate's type check needs `pyright` on the PATH, which the line above does not install
+(`brew install pyright`, or `npm install -g pyright`). Without it the gate prints FAILED at
+"types" and nothing else is wrong. In a fresh clone about 58 tests skip, because the photos and
+recordings they use are not in git (`CLAUDE.md`, "Test data, baselines and knobs").
+
 ## Try it
 
 The example circuits live in `examples/`. The BasicBoard ones are built from its **measured**
