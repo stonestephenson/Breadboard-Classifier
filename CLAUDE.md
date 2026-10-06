@@ -75,22 +75,6 @@ ring (`spill`), and on a bright board that camera can leave no channel risen at 
 fix is to name it from the signed change beside the LED minus the far board, which the glow
 test already measures (`_strength`). Do this before anything else in `blink.py`.
 
-**Decided by Stone on 2026-10-05, not yet done.** Small jobs, after the known gap, in any order:
-
-- Fix the `shorted_component` message in `check.py`. It says both legs are "in the same row"
-  (by `board.py`'s naming they share a column's strip) and prints the raw part id. Name the
-  part as other messages do ("the blue LED") and say the strip.
-- Compare a sensor's `kind` when both the lab and the build state one (`graph.SIGNIFICANT_ATTRS`
-  has no sensor entry, so the wrong sensor passes). Then remove the note in `docs/CHECKER.md`
-  that says it is not compared.
-- Edit `.claude/verify.sh`. Stone has approved this edit and no other to that file: correct its
-  two stale comments (it takes about two and a half minutes; the tests exercise the rectifier
-  now), and remove the spike step, which overwrites `data/cache/rectified.jpg` on every run.
-- Trim `docs/OPEN_QUESTIONS.md` to its current answers (drop the SUPERSEDED originals; fix the
-  stale passages under Q1, Q4 and Q5) and `docs/SPIKE_RECTIFY.md` to what describes the rectifier
-  in use. The old text stays in git history. Then drop the caution under "Open questions" below.
-- `data/cache/` stays without a backup. Stone decided against one.
-
 The checker's known limits are in `docs/CHECKER.md` ("What is not built yet"): no fix that adds a
 part (a missing wire), and no first step when two changes only help together.
 
@@ -100,7 +84,8 @@ The tests on real photos and recorded blink runs need files under `data/cache/`,
 git. Without them those tests skip (about 58) and the gate still goes green, so a fresh clone and
 CI never exercise real data. Do not tune `blink.py` or `rectify.py` on a machine without them.
 **`data/cache/` exists only on Stone's Mac. There is no second copy and no way to rebuild the
-recordings**, so do not rename, move or delete anything in it without need.
+recordings**, so do not rename, move or delete anything in it without need. Stone decided against
+a backup (2026-10-05).
 
 - `data/cache/sample/` holds 12 photos sampled from `../breadboard_generator/data/real/`
   (`docs/SPIKE_RECTIFY.md`), and `data/cache/kit/basicboard.jpg` one photo of the kit's board.
@@ -201,8 +186,6 @@ From Stone (project side):
 
 Sent to the curriculum/engineering team. Most are answered; `docs/OPEN_QUESTIONS.md` has the
 answers in full and is the one place they are kept.
-Some passages inside that file are older than its own headings (under Q1, Q4 and Q5). Where it and
-the table below disagree, the table is the current one.
 
 | # | Question | State |
 |---|----------|-------|

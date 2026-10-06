@@ -161,5 +161,5 @@ Other cautions:
   memory writes), and stable across firmware revisions.
 - **Report the dead-opcode bug** — `digitalRead` on pins 0–5 and 7 is unreachable.
 - **Open:** whether the web app will let our code send raw serial commands. This is the real
-  remaining dependency, and it is a *web app* question, not a firmware one — so accept the offer
-  to see the web app source.
+  remaining dependency, and it is a *web app* question, not a firmware one. The web app's source
+  has since arrived (held locally, for reference only).

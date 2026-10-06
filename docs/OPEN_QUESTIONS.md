@@ -1,7 +1,8 @@
 # Open questions
 
-Sent to the SSU curriculum / engineering team on 2026-08-06. Update this file with answers as
-they arrive, and note what each answer unblocks or changes.
+Sent to the SSU curriculum / engineering team on 2026-08-06. Each question is given as it was
+asked, with its current answer. The reasoning behind each question and the first partial answers
+were removed on 2026-10-05 and are in git history.
 
 Routing: Q1 → the programmer who wrote the LbyM technical brief. Q5 → Hannah, named as
 the kit contact in the STEMACES kit contents list (held locally, not in this repo). Q2–Q4 →
@@ -9,71 +10,52 @@ curriculum side.
 
 ---
 
-## Q1 — WebSerial and the diagnostic sketch  🟢 LARGELY RESOLVED (2026-08-06)
-
-**Firmware side is solved.** The sketch source arrived and exposes arbitrary memory read/write,
-which on the ATmega328P means full memory-mapped GPIO control. A complete connectivity probe is
-implementable **today, with no firmware change**. Full analysis in `docs/FIRMWARE_PROTOCOL.md`.
-
-**What still matters from Troy / the web app:**
-- Whether our code may send raw serial commands through the web app. This is now the *only*
-  remaining dependency for the measurement channel, and it is a web-app question, not firmware.
-  → **Accept the offer to see the web app source.**
-- A first-class diagnostic opcode as the production path: faster, safer, and stable across
-  firmware revisions than poking memory.
-- A bug report: `digitalRead` on pins 0–5 and 7 is unreachable, shadowed by earlier branches in
-  the dispatch chain.
-
-### Earlier partial answer
-
-**Answered so far:**
-- A **bidirectional command/response protocol already exists**: the web app sends commands over
-  a USB interface, the sketch executes them, and *data is returned*. The measurement channel's
-  transport is therefore already built and in daily classroom use.
-- **We may not flash our own sketch.** "Any sketch that overwrites arduino is no bueno." The
-  shipped sketch is the integration point, not a replacement for it.
-- Adding a diagnostic routine to the existing sketch is considered plausible.
-- **They offered us the sketch source.** Accept immediately.
-- Exact WebSerial capability forwarded to Troy.
-
-**What to look for in the sketch source — this is the pivotal detail.** If the existing command
-set already exposes *generic pin primitives* (set pin high/low, read digital/analog pin), then
-the entire connectivity probe can be implemented **client-side in JavaScript using commands
-they already ship**. No firmware change, no Troy dependency, no deployment risk, nothing to
-negotiate. Given that the platform's whole purpose is reading sensors from student code, such
-primitives very likely exist in some form.
-
-Only if they do not do we need a new firmware command, which is a slower path through their
-release process.
-
----
-
-## Q1 (original text)  ⬛ SUPERSEDED BY ABOVE
+## Q1 — WebSerial and the diagnostic sketch  🟢 LARGELY RESOLVED
 
 > Can the web app talk to the Metro Mini over WebSerial today? And for running connection
 > diagnostics, would it be possible either for us to load our own diagnostic sketch — or,
 > probably simpler, for a diagnostic routine to be added to the sketch you already ship, that
 > responds to a command over the serial connection?
 
-**Unblocks:** the entire measurement channel (ARCHITECTURE.md §3[4]) *and* automatic labelling
-of training data.
+**The web app already talks to the board.** It sends commands over USB, the sketch carries them
+out, and data comes back: a command and response protocol in daily classroom use.
 
-**Why it is the highest-leverage question:** connectivity is precisely what vision is worst at
-and what electricity is best at. A yes converts the least reliable stage of the pipeline into a
-hardware fact, and gives us labelled training data with zero annotation effort.
+**The firmware side is solved, with no firmware change.** We may not flash our own sketch ("any
+sketch that overwrites arduino is no bueno"), so the shipped sketch is the integration point. Its
+source arrived on 2026-08-06 and exposes arbitrary memory read and write, which on the ATmega328P
+means full memory-mapped GPIO control. The connectivity probe (`tools/probe.py`) and blink and
+watch (`tools/blink.py`) are built on that and work on the real board, from Python over USB. Full
+analysis in `docs/FIRMWARE_PROTOCOL.md`.
 
-**If no:** everything still works, photo-only, with materially lower reliability and a much
-more expensive data-collection story.
+**Still open:**
+
+- **The browser.** Nothing has been run from Chrome over WebSerial yet, on a school machine or
+  any other. That port waits until the rest is an MVP (`CLAUDE.md`, "Next").
+- **The web app.** Whether our code may send raw serial commands through it. This is the only
+  remaining dependency for the measurement channel, and it is a web-app question, not a firmware
+  one. The web app's source has arrived (held locally, for reference only).
+
+**Worth raising with Troy:**
+
+- A first-class diagnostic opcode as the production path: faster, safer, and stable across
+  firmware revisions than poking memory. The team's first reply called adding a diagnostic
+  routine to the existing sketch plausible.
+- A bug report: `digitalRead` on pins 0–5 and 7 is unreachable, shadowed by earlier branches in
+  the dispatch chain.
 
 ---
 
 ## Q2 — Camera and device  🟡 SOFT ANSWER + NEW PROBLEM (2026-08-06)
 
+> What type of camera will the students use to capture the breadboard — only the Chromebook, or
+> are they allowed to use a phone? And which Chromebook model do they use?
+
 **Answered:** "I imagine a phone." Chromebook models "vary by district, would be impossible to
 know."
 
 **Treat as provisional** — "I imagine" is a guess, not policy, and it now determines system
-topology (below). Needs confirmation.
+topology (below). Needs confirmation. Meanwhile both capture paths are supported
+(ARCHITECTURE.md §3[1]).
 
 **If phone is right, two good consequences:**
 - The 248 existing photos are **the correct domain** after all. No re-collection needed.
@@ -106,29 +88,12 @@ the photo expected to reach the web app?
 
 ---
 
-## Q2 (original text)  ⬛ SUPERSEDED BY ABOVE
-
-> What type of camera will the students use to capture the breadboard — only the Chromebook, or
-> are they allowed to use a phone? And which Chromebook model do they use?
-
-**Unblocks:** training-data domain, model size budget, achievable precision.
-
-**Why the model number matters:** from it we can look up camera resolution, processor, and
-WebGPU support ourselves — one question, several answers.
-
-**Stakes.** With the board filling a 720p frame we get ≈7.7 px/mm, about 20 px between adjacent
-holes — workable for the lattice, marginal for fine detail like an LED's flat edge. At 1080p it
-is ≈30 px per pitch and comfortable. Phone capture is ≈3× linear resolution again.
-
-**Consequence either way:** the 248 existing photos are phone-sourced. If production is a
-webcam, they remain valid for the crop library, geometry work and evaluation, but a second
-collection pass through the real device is needed for training.
-
----
-
 ## Q3 — Which board, and is it electrically reachable  ✅ ANSWERED (2026-08-06)
 
-**The best answers in the whole exchange.**
+> The docx mentions two boards the student has: a pre-assembled BasicBoard (with the Arduino and
+> sketch), and a separate blank breadboard. Which one gets built on? What exactly is the "blank
+> breadboard w/picture"? Is the student's circuit electrically connected to the Arduino during
+> the lab, or can it be standalone on coin-cell power?
 
 - **Students build on the pre-assembled BasicBoard.**
 - **The blank breadboard can be ignored entirely.** It is for non-Arduino activities and is out
@@ -139,17 +104,17 @@ collection pass through the real device is needed for training.
 
 1. **The measurement channel is universal, not partial.** Every lab circuit is reachable from
    the Arduino's pins. The coin-cell standalone case that would have blinded us does not arise.
-   Combined with the confirmed command/response protocol in Q1, electrical measurement moves
-   from "promising mitigation" to *the likely backbone of the system*.
+   Combined with the shipped sketch's own commands (Q1), electrical measurement moves from
+   "promising mitigation" to *the likely backbone of the system*.
 
 2. **The component inventory is known**, though not the layout. The BasicBoard ships
    pre-populated (4 LEDs, 4 resistors, 4 black wires, Metro Mini), so we know *what* is on the
    board before looking. Useful.
 
-3. **Positions are NOT known.** *(Corrected 2026-08-06 — an earlier draft of this file claimed
-   otherwise.)* Students can move pre-positioned parts, and moving one is itself a plausible
-   error we must catch. The factory layout is a prior for ranking hypotheses, never a constraint
-   to verify against. The positional prior given up in DECISIONS.md R2/R3 stays given up.
+3. **Positions are NOT known.** Students can move pre-positioned parts, and moving one is itself
+   a plausible error we must catch. The factory layout is a prior for ranking hypotheses, never
+   a constraint to verify against. The positional prior given up in DECISIONS.md R2/R3 stays
+   given up.
 
 4. **Anchoring must use board-intrinsic features**, not the Metro Mini
    (`docs/SPIKE_RECTIFY.md`). The 3-pitch centre channel and the asymmetric red/blue rail stripe
@@ -158,76 +123,37 @@ collection pass through the real device is needed for training.
 
 ---
 
-## Q3 (original text)  ⬛ SUPERSEDED BY ABOVE
-
-> The docx mentions two boards the student has: a pre-assembled BasicBoard (with the Arduino and
-> sketch), and a separate blank breadboard. Which one gets built on? What exactly is the "blank
-> breadboard w/picture"? Is the student's circuit electrically connected to the Arduino during
-> the lab, or can it be standalone on coin-cell power?
-
-**Unblocks:** what a "correct" build even looks like, and — critically — whether the
-measurement channel from Q1 can reach the student's circuit at all.
-
-**Why the last part matters most:** the kit contains CR2032 coin cells and holders. If circuits
-are built standalone on the blank board with battery power and no connection to the Arduino,
-WebSerial gives us nothing for those labs and we are photo-only regardless of how Q1 lands.
-
-**Also watching:** "w/picture" is unexplained. If it turns out to be a printed placement
-diagram, some positional prior may come back — which would partially resurrect the cheap paths
-rejected in DECISIONS.md R2/R3.
-
----
-
-## Q4 — The labs themselves  🟢 MOSTLY ANSWERED (2026-08-06)
-
-**~7 labs** will use photo troubleshooting. Small and tractable: authoring 7 reference circuits
-is a bounded content task, not an open-ended one.
-
-**Curriculum available from Hannah** — same contact as the kit, so one email covers both.
-
-Still to read from the actual labs: complexity range, how much the instructions constrain
-structure, and how many genuinely different arrangements are correct per lab.
-
----
-
-## Q4 (original text)  ⬛ SUPERSEDED BY ABOVE
+## Q4 — The labs themselves  🟢 MOSTLY ANSWERED
 
 > Roughly how many labs will use photo troubleshooting? Can we see two or three complete labs as
 > students receive them, with the actual instructions, plus whatever the "correct" build looks
 > like?
 
-**Unblocks:** the netlist schema, the checker's property rules, and the error taxonomy. This is
-on the critical path — the diagnostic engine cannot be finished or meaningfully tested without
-real examples.
+**About seven labs** will use photo troubleshooting, so authoring their reference circuits is a
+bounded content task, not an open-ended one.
 
-**What we are reading them for:**
-- Complexity range: how many components and connections in a typical lab.
-- How much the instructions constrain student choices (they cannot fix hole positions, but they
-  may still pin down circuit *structure*).
-- How much topological freedom exists — how many genuinely different arrangements are correct.
-  This determines the property rules in verification stage A.
+**The files for five activities have arrived** and have been read. They are held locally, not
+in this repo, and are not to be quoted here (`CLAUDE.md`, "Third-party material"). What each
+kind of lab needs, and how far the system covers it, is in `CLAUDE.md` ("What works for which
+kind of lab"). Lab circuits are written for the BasicBoard as shipped and for Activity 3. The two
+design-challenge activities leave the choice of pin to the student, which a lab file cannot say
+yet (`docs/CHECKER.md`, "What is not built yet").
 
----
-
-## Q5 — Obtaining a kit  ✅ ANSWERED (2026-08-06)
-
-Contact **Hannah** (address in the kit contents list). Action item, not a question. Request
-the kit and the curriculum for the ~7 labs in the same message.
+**Still open:** the rest of the "about seven" have not been seen.
 
 ---
 
-## Q5 (original text)  ⬛ SUPERSEDED BY ABOVE
+## Q5 — Obtaining a kit  ✅ ANSWERED
 
 > How can we obtain a complete kit that a student has, containing all the parts that we should
 > be expecting / training the model on?
 
-**Unblocks:** the component crop library, rectification testing on real webcam frames, hands-on
-testing of the measurement channel, and every remaining hardware question — including whether
-the light and temperature sensors plug into the board or attach by cable, which changes whether
-sensor orientation is a checkable error.
+Through **Hannah**, the kit contact (address in the kit contents list). The kit's pre-built
+BasicBoard, with its Metro Mini, is in hand: everything this repo measures on real hardware was
+measured on it.
 
-Highest-priority logistical ask. A kit on the desk answers a dozen questions we have not thought
-to ask yet, with no email round-trips.
+One thing the kit was wanted for is still not settled: how the temperature sensor mounts. The
+light sensor plugs into the board on three legs (ARCHITECTURE.md §5).
 
 ---
 
