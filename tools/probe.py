@@ -277,10 +277,10 @@ def watch_analog(b: Board, seconds: float) -> dict[str, tuple[int, int]]:
 
     This is the electrical half of Activity 3. Pin-to-pin continuity cannot see
     that lab at all -- a sensor is not a short, so the three jumper wires join
-    nothing the scan can detect. But the lab's own acceptance criterion is that
-    "the brightness readings change when the light changes", and that is
-    directly measurable. So this answers *whether the circuit works*, and the
-    checker answers *why it does not*.
+    nothing the scan can detect. But the lab counts as working when the
+    sensor's reading follows the light falling on it, and that is directly
+    measurable. So this answers *whether the circuit works*, and the checker
+    answers *why it does not*.
     """
     print(f"\nwatching A0-A5 for {seconds:.0f}s — cover the sensor, then shine a")
     print("light on it, so we can see which channel responds\n")

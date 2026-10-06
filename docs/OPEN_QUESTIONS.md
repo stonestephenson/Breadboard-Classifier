@@ -150,7 +150,7 @@ yet (`docs/CHECKER.md`, "What is not built yet").
 
 Through **Hannah**, the kit contact (address in the kit contents list). The kit's pre-built
 BasicBoard, with its Metro Mini, is in hand: everything this repo measures on real hardware was
-measured on it.
+measured on it. We can get any other part of the kit, the sensors included, when it is needed.
 
 One thing the kit was wanted for is still not settled: how the temperature sensor mounts. The
 light sensor plugs into the board on three legs (ARCHITECTURE.md §5).

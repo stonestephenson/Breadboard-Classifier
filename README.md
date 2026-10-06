@@ -148,8 +148,8 @@ is in the wrong way round… at d31, d32".
 
 `--analog` is Activity 3's own acceptance test, measured directly. Continuity cannot see that
 lab at all — a sensor is not a short, so the three jumper wires join nothing a scan detects — but
-the worksheet's criterion is that "the brightness readings change when the light changes", and
-that is measurable. It answers *whether the circuit works*; the checker answers *why it does not*.
+the lab counts as working when the sensor's reading follows the light falling on it, and that
+is measurable. It answers *whether the circuit works*; the checker answers *why it does not*.
 
 This runs against the **shipped** LbyM sketch with no firmware change and needs nothing from the
 web app — see [docs/FIRMWARE_PROTOCOL.md](docs/FIRMWARE_PROTOCOL.md) for how, and for the safety
